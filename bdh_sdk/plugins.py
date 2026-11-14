@@ -10,13 +10,55 @@ still being built.
 """
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from importlib import import_module
 
 log = logging.getLogger(__name__)
 
-API_VERSION = 1
+# 2: apps run in their own container and reach the hub through the broker.
+API_VERSION = 2
+
+# Container manifest. "none" has no network except the hub broker,
+# "outbound" adds internet access through the egress proxy, "lan" runs on
+# the host network (admin must approve; needed for multicast discovery).
+NETWORK_NONE = "none"
+NETWORK_OUTBOUND = "outbound"
+NETWORK_LAN = "lan"
+NETWORKS = frozenset({NETWORK_NONE, NETWORK_OUTBOUND, NETWORK_LAN})
+
+# "always" apps keep running (background work, live events); "on_demand"
+# apps are started by the first request and stopped when idle.
+LIFECYCLE_ALWAYS = "always"
+LIFECYCLE_ON_DEMAND = "on_demand"
+LIFECYCLES = frozenset({LIFECYCLE_ALWAYS, LIFECYCLE_ON_DEMAND})
+
+DEFAULT_MEMORY_MB = 96
+MIN_MEMORY_MB = 48
+MAX_MEMORY_MB = 256
+
+# Helper containers the platform knows how to run next to an app.
+COMPANIONS = frozenset({"go2rtc"})
+
+# Permissions an app can request; the admin approves a subset.
+#   ha.read:<entity glob>        read states/history, e.g. ha.read:sensor.*
+#   ha.call:<domain>.<service>   call a service, e.g. ha.call:light.turn_on
+#   events.publish:<topic glob>  publish hub events
+#   events.subscribe:<topic glob>
+#   alerts, speakers, media      raise popups, announce, upload media to HA
+_ENTITY_GLOB = r"[a-z0-9_*]+(\.[a-z0-9_*]+)?"
+_TOPIC_GLOB = r"[A-Za-z0-9_./*#+-]+"
+_PERMISSION_RE = re.compile(
+    rf"(ha\.read:{_ENTITY_GLOB}"
+    r"|ha\.call:[a-z0-9_]+\.([a-z0-9_]+|\*)"
+    rf"|events\.(publish|subscribe):{_TOPIC_GLOB}"
+    r"|alerts|speakers|media)"
+)
+
+
+def valid_permission(perm: str) -> bool:
+    return isinstance(perm, str) and bool(_PERMISSION_RE.fullmatch(perm))
 
 # Entry point group that separately installed apps register their spec under.
 ENTRY_POINT_GROUP = "blackdiamondhub.plugins"
@@ -357,6 +399,12 @@ class PluginSpec:
     parts of the hub can use. ``stat_keys`` lists the ``(key, label)`` of
     every stat the app may provide. An app needs no tiles or URLs: it can
     just provide data and settings.
+
+    The container manifest: ``permissions`` lists what the app asks the hub
+    broker for (see :func:`valid_permission`); the admin grants a subset.
+    ``network`` is one of :data:`NETWORKS`, ``lifecycle`` one of
+    :data:`LIFECYCLES`, ``memory_mb`` the container memory limit and
+    ``companions`` names platform helper containers (e.g. ``"go2rtc"``).
     """
 
     id: str
@@ -376,6 +424,11 @@ class PluginSpec:
     provides: dict[str, str] = field(default_factory=dict, hash=False)
     stat_keys: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     api_version: int = API_VERSION
+    permissions: tuple[str, ...] = field(default_factory=tuple)
+    network: str = NETWORK_OUTBOUND
+    lifecycle: str = LIFECYCLE_ON_DEMAND
+    memory_mb: int = DEFAULT_MEMORY_MB
+    companions: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
         keys = [key for key, _label in self.stat_keys]
@@ -383,6 +436,33 @@ class PluginSpec:
             raise ValueError(f"plugin {self.id!r} has duplicate stat_keys")
         if any(not key or not label for key, label in self.stat_keys):
             raise ValueError(f"plugin {self.id!r} stat_keys need a key and a label")
+        for perm in self.permissions:
+            if not valid_permission(perm):
+                raise ValueError(f"plugin {self.id!r} has invalid permission {perm!r}")
+        if self.network not in NETWORKS:
+            raise ValueError(f"plugin {self.id!r} network must be one of {sorted(NETWORKS)}")
+        if self.lifecycle not in LIFECYCLES:
+            raise ValueError(f"plugin {self.id!r} lifecycle must be one of {sorted(LIFECYCLES)}")
+        if not isinstance(self.memory_mb, int) or not MIN_MEMORY_MB <= self.memory_mb <= MAX_MEMORY_MB:
+            raise ValueError(
+                f"plugin {self.id!r} memory_mb must be {MIN_MEMORY_MB}..{MAX_MEMORY_MB}"
+            )
+        for name in self.companions:
+            if name not in COMPANIONS:
+                raise ValueError(f"plugin {self.id!r} has unknown companion {name!r}")
+
+    def manifest(self) -> dict:
+        """The container/runtime facts the store and supervisor need."""
+        return {
+            "id": self.id,
+            "api_version": self.api_version,
+            "permissions": sorted(set(self.permissions)),
+            "network": self.network,
+            "lifecycle": self.lifecycle,
+            "memory_mb": self.memory_mb,
+            "companions": list(self.companions),
+            "provides": sorted(self.provides),
+        }
 
     @property
     def prefix(self) -> str:

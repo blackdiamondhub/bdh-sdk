@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 
-__all__ = ["PluginImportError", "assert_plugin_importable", "probe_plugin_import"]
+__all__ = ["FakeBroker", "PluginImportError", "assert_plugin_importable", "probe_plugin_import"]
 
 DEFAULT_FORBIDDEN = ("requests",)
 
@@ -112,3 +112,125 @@ def assert_plugin_importable(module_path, **kwargs):
             f"{module_path} is not a clean plugin module: " + "; ".join(problems)
         )
     return result
+
+class FakeBroker:
+    """A broker on ``127.0.0.1`` for app tests, in a background thread.
+
+    It records every call in :attr:`calls` (``(op, payload)``) and answers
+    ``settings.*`` and ``state.*`` from :attr:`settings` / :attr:`state`
+    (``{(app, key): value}``). Anything else answers ``None`` unless a
+    handler is registered with :meth:`on` (``fn(payload) -> result``; raise
+    :class:`FakeBroker.Error` to fail the call). Ops outside :attr:`grants`
+    (fnmatch patterns; default everything) get 403. Use as a context manager;
+    ``install=True`` also points the SDK at it via :func:`bdh_sdk.rpc.install`.
+    """
+
+    class Error(Exception):
+        def __init__(self, code, message="", status=400):
+            super().__init__(message or code)
+            self.code, self.message, self.status = code, message or code, status
+
+    def __init__(self, token="test-token", *, grants=("*",), install=False):
+        self.token = token
+        self.grants = list(grants)
+        self.calls = []
+        self.settings = {}
+        self.state = {}
+        self.handlers = {}
+        self._install = install
+        self._server = None
+        self._thread = None
+        self.url = ""
+
+    def on(self, op, fn):
+        self.handlers[op] = fn
+        return fn
+
+    def ops(self, op):
+        """Payloads of every call to ``op``, in order."""
+        return [p for o, p in self.calls if o == op]
+
+    def start(self):
+        import http.server
+        import threading
+
+        broker = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                status, body = broker._handle(self.path, self.headers, self.rfile.read(
+                    int(self.headers.get("Content-Length") or 0)))
+                raw = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server.daemon_threads = True
+        self.url = f"http://127.0.0.1:{self._server.server_address[1]}"
+        self._thread = threading.Thread(target=self._server.serve_forever, name="fake-broker",
+                                        daemon=True)
+        self._thread.start()
+        if self._install:
+            from . import rpc
+            rpc.install(rpc.Client(self.url, self.token, retries=0))
+        return self
+
+    def stop(self):
+        if self._install:
+            from . import rpc
+            rpc.flush()
+            rpc.uninstall()
+        if self._server:
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *exc):
+        self.stop()
+
+    def _handle(self, path, headers, raw):
+        import fnmatch
+
+        if headers.get("Authorization") != f"Bearer {self.token}":
+            return 401, {"ok": False, "error": {"code": "unauthorized", "message": "bad token"}}
+        if not path.startswith("/rpc/"):
+            return 404, {"ok": False, "error": {"code": "not_found", "message": path}}
+        op = path[len("/rpc/"):]
+        try:
+            payload = json.loads(raw or b"{}")
+        except ValueError:
+            return 400, {"ok": False, "error": {"code": "invalid", "message": "bad JSON"}}
+        self.calls.append((op, payload))
+        if not any(fnmatch.fnmatchcase(op, g) for g in self.grants):
+            return 403, {"ok": False, "error": {"code": "forbidden", "message": f"{op} not granted"}}
+        try:
+            if op in self.handlers:
+                result = self.handlers[op](payload)
+            else:
+                result = self._default(op, payload)
+        except FakeBroker.Error as exc:
+            return exc.status, {"ok": False, "error": {"code": exc.code, "message": exc.message}}
+        return 200, {"ok": True, "result": result}
+
+    def _default(self, op, p):
+        key = (p.get("app"), p.get("key"))
+        if op == "settings.get":
+            return {"found": key in self.settings, "value": self.settings.get(key)}
+        if op == "state.get":
+            return {"found": key in self.state, "value": self.state.get(key)}
+        if op == "state.set":
+            self.state[key] = p.get("value")
+        elif op == "state.delete":
+            self.state.pop(key, None)
+        elif op == "state.keys":
+            return sorted(k for a, k in self.state if a == p.get("app"))
+        return None

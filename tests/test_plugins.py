@@ -90,6 +90,42 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(json.loads(proc.stdout), [])
 
 
+class ManifestTests(unittest.TestCase):
+    def test_defaults(self):
+        m = PluginSpec(id="wifi", app="wifi").manifest()
+        self.assertEqual(
+            (m["network"], m["lifecycle"], m["memory_mb"], m["permissions"], m["companions"]),
+            ("outbound", "on_demand", 96, [], []),
+        )
+
+    def test_valid_permissions(self):
+        perms = ("ha.read:sensor.*", "ha.read:*", "ha.read:light.kitchen",
+                 "ha.call:light.turn_on", "ha.call:scene.*",
+                 "events.publish:cameras/motion", "events.subscribe:cameras/#",
+                 "alerts", "speakers", "media")
+        spec = PluginSpec(id="a", app="a", permissions=perms)
+        self.assertEqual(spec.manifest()["permissions"], sorted(perms))
+
+    def test_rejects_bad_manifest(self):
+        bad = [
+            {"permissions": ("ha.call:*",)},
+            {"permissions": ("ha.read:Light.X",)},
+            {"permissions": ("ha.*",)},
+            {"permissions": ("docker",)},
+            {"permissions": ("events.publish:",)},
+            {"network": "host"},
+            {"lifecycle": "sometimes"},
+            {"memory_mb": 1024},
+            {"memory_mb": 8},
+            {"memory_mb": "96"},
+            {"companions": ("redis",)},
+        ]
+        for kwargs in bad:
+            with self.subTest(**{k: str(v) for k, v in kwargs.items()}):
+                with self.assertRaises(ValueError):
+                    PluginSpec(id="a", app="a", **kwargs)
+
+
 if __name__ == "__main__":
     unittest.main()
 

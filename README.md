@@ -417,6 +417,31 @@ Imports the module in a fresh interpreter and fails if it doesn't expose a
 threads, or imports `requests`, any `*.models` module, or the app's `views`
 or `homepage` modules. Pass `forbidden=("name", ...)` to ban more modules.
 
+## Running in a container
+
+With the `runtime` extra, an app runs on its own: `python -m bdh_sdk.runtime`
+serves the app named by `BDH_APP_ID` with uvicorn, a SQLite database in
+`BDH_DATA_DIR` and the SDK's own `base.html`. The hub's supervisor starts it
+and the hub proxies to it inside an iframe.
+
+- `BDH_BROKER_URL` / `BDH_APP_TOKEN` switch settings, state, alerts, events,
+  speakers and `ha` to RPC calls to the hub broker (`bdh_sdk.rpc`). Without
+  them everything runs in-process as before.
+- `bdh_sdk.identity.IdentityMiddleware` only accepts requests the hub signed
+  with the app token and sets `request.user` (`username`, `is_staff`) and
+  `request.bdh_mode` from the signed identity header.
+- The hub reads tiles, status and shortcuts through `POST /_bdh/hook` and
+  relays events through `POST /_bdh/events`; `GET /_bdh/health` is unsigned.
+- `bdh/embed.js` talks to the hub shell with `postMessage` (title, resize,
+  activity, navigate, toast, open-overlay).
+
+Manifest fields for the app store: `permissions`, `network`
+(`none`/`outbound`/`lan`), `lifecycle` (`always`/`on_demand`), `memory_mb`,
+`companions`.
+
+`bdh_sdk.testing.FakeBroker` is an in-process broker for app tests: register
+handlers with `.on(op, fn)` and check `.calls`.
+
 ## Reusable CI for app repos
 
 `.github/workflows/app-ci.yml` is a reusable workflow. In an app repo:

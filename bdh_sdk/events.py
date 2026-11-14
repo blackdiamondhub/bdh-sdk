@@ -33,11 +33,13 @@ __all__ = [
     "Subscription",
     "add_listener",
     "apublish",
+    "deliver",
     "flush",
     "matches",
     "patterns",
     "publish",
     "reset",
+    "set_forwarder",
     "subscribe",
 ]
 
@@ -105,6 +107,7 @@ _listeners: list[Callable[[list[str]], None]] = []
 _thread: threading.Thread | None = None
 _loop: asyncio.AbstractEventLoop | None = None
 _tasks: set = set()
+_forwarder: Callable[[Event], None] | None = None
 
 
 def subscribe(pattern: str, handler: Callable[[Event], Any]) -> Subscription:
@@ -165,6 +168,30 @@ def publish(topic: str, data: Any = None) -> None:
     _segments(topic, wildcards=False)
     event = Event(topic, data)
     _ensure_loop().call_soon_threadsafe(_dispatch, event)
+    forwarder = _forwarder
+    if forwarder is not None:
+        _safe_call(forwarder, event)
+
+
+def set_forwarder(forwarder: Callable[[Event], None] | None) -> None:
+    """Also hand every :func:`publish`-ed event to ``forwarder(event)``.
+
+    An app in its own container uses this to send its events to the hub
+    broker. The forwarder must not block. ``None`` removes it.
+    """
+    global _forwarder
+    _forwarder = forwarder
+
+
+def deliver(topic: str, data: Any = None, time: float | None = None) -> None:
+    """Dispatch an event that arrived from elsewhere to local subscribers only.
+
+    Unlike :func:`publish` it is not forwarded, so events relayed by the hub
+    broker don't loop back to it.
+    """
+    _segments(topic, wildcards=False)
+    event = Event(topic, data) if time is None else Event(topic, data, time)
+    _ensure_loop().call_soon_threadsafe(_dispatch, event)
 
 
 async def apublish(topic: str, data: Any = None) -> None:
@@ -194,6 +221,7 @@ def reset() -> None:
     with _lock:
         _subs.clear()
         _listeners.clear()
+    set_forwarder(None)
 
 
 async def _drain():
