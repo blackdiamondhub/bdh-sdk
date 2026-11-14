@@ -6,6 +6,18 @@ Importing this package never imports or configures Django, so app
 from .plugins import (
     ALL_MODES,
     API_VERSION,
+    COMPANIONS,
+    DEFAULT_MEMORY_MB,
+    LIFECYCLE_ALWAYS,
+    LIFECYCLE_ON_DEMAND,
+    LIFECYCLES,
+    MAX_MEMORY_MB,
+    MIN_MEMORY_MB,
+    NETWORK_LAN,
+    NETWORK_NONE,
+    NETWORK_OUTBOUND,
+    NETWORKS,
+    valid_permission,
     Action,
     Card,
     DASHBOARD,
@@ -31,7 +43,7 @@ from .plugins import (
 from .auth import is_admin
 from .provides import BACKGROUNDS, SEASON, STATS, Background, SeasonHint, Stat
 
-__version__ = "0.19.1"
+__version__ = "0.20.0"
 
 __all__ = [
     "__version__",
@@ -58,6 +70,18 @@ __all__ = [
     "Setting",
     "SettingsPage",
     "PluginSpec",
+    "NETWORK_NONE",
+    "NETWORK_OUTBOUND",
+    "NETWORK_LAN",
+    "NETWORKS",
+    "LIFECYCLE_ALWAYS",
+    "LIFECYCLE_ON_DEMAND",
+    "LIFECYCLES",
+    "DEFAULT_MEMORY_MB",
+    "MIN_MEMORY_MB",
+    "MAX_MEMORY_MB",
+    "COMPANIONS",
+    "valid_permission",
     "is_admin",
     "STATS",
     "BACKGROUNDS",

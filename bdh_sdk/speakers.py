@@ -27,7 +27,7 @@ from urllib.parse import quote
 from . import ha
 from .alerts import CHIMES, SILENT
 
-__all__ = ["DEFAULT_TTS", "AnnounceError", "announce", "chime_seconds", "list_speakers", "tts_audio"]
+__all__ = ["DEFAULT_TTS", "AnnounceError", "announce", "chime_seconds", "list_speakers", "set_backend", "tts_audio"]
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +51,17 @@ class AnnounceError(Exception):
     """Raised when an announcement can't be played on any speaker."""
 
 
+_backend = None
+
+
+def set_backend(backend):
+    """Route ``list_speakers``, ``announce`` and ``tts_audio`` through
+    ``backend`` (the hub broker, for apps in their own container).
+    ``None`` restores direct Home Assistant calls."""
+    global _backend
+    _backend = backend
+
+
 def _registry():
     """entity_id -> platform for the speakers we can announce on."""
     (entries,) = ha.ws_commands({"type": "config/entity_registry/list"})
@@ -65,6 +76,8 @@ def _registry():
 
 def list_speakers():
     """Sonos and Alexa speakers as ``(entity_id, "Name (Sonos)")`` pairs, by name."""
+    if _backend is not None:
+        return _backend.list_speakers()
     platforms = _registry()
     states = {s["entity_id"]: s for s in ha.get_all_states() if s["entity_id"] in platforms}
     out = []
@@ -122,6 +135,8 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
     Blocks until the message has been sent. Returns the entity ids that
     failed; raises AnnounceError if every speaker failed.
     """
+    if _backend is not None:
+        return _backend.announce(message, speakers, volume, chime, tts_engine, voice)
     if not message or not message.strip():
         raise ValueError("message is required")
     if chime not in (None, SILENT) and chime not in CHIMES:
@@ -176,6 +191,8 @@ def tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
     Raises ValueError for empty or over-long text and ``ha.HAError`` when HA
     can't make it.
     """
+    if _backend is not None:
+        return _backend.tts_audio(message, tts_engine, voice)
     message = (message or "").strip()
     if not message:
         raise ValueError("message is required")

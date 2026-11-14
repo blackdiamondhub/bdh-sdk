@@ -1,0 +1,12 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+    <meta name="bdh-hub-origin" content="{{ hub_origin }}"><title></title></head>
+<body>
+    {{ target|json_script:"bdh-navigate" }}
+    <script src="{% static 'bdh/embed.js' %}"></script>
+    <script>
+        bdh.navigate(JSON.parse(document.getElementById('bdh-navigate').textContent));
+    </script>
+</body>
+</html>

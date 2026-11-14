@@ -1,0 +1,410 @@
+/* Shared hub page styles, copied from the hub's base.html so apps look the same inside their iframe. */
+/* General Styles */
+html, body {
+    height: 100%;
+    margin: 0;
+    overflow-x: hidden;
+}
+
+body {
+    background-color: #f8f9fa;
+    display: flex;
+    flex-direction: column;
+    font-family: Arial, sans-serif;
+}
+
+/* ── Navbar ── */
+.navbar {
+    padding: 0.5rem 1rem;
+}
+
+.navbar-brand {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+/* Touch-friendly navbar icons/buttons — 48×48 minimum tap target */
+.nav-link,
+.navbar-brand {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 8px 14px;
+}
+
+/* Explicit white for nav-link icons inside the navbar.
+   Without .navbar-nav wrapper, Bootstrap's navbar-dark
+   colour rules don't reach these links, so the icon
+   colour would fall back to the inherited body text
+   colour — invisible on pages that keep the default
+   dark body colour. */
+.navbar .nav-link {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.navbar .nav-link:hover {
+    color: #fff;
+}
+
+.nav-link i {
+    font-size: 1.35rem;
+}
+
+/* Signed-in avatar pill + menu */
+.hub-user { position: relative; margin-left: 4px; }
+.hub-ava {
+    height: 44px; min-width: 48px; border-radius: 999px; position: relative;
+    display: inline-flex; align-items: center; gap: 9px; padding: 0 14px 0 5px;
+    background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .12);
+    color: #e8eef5; font-size: 15px; font-weight: 600; cursor: pointer; transition: background .2s;
+}
+.hub-ava:hover, .hub-ava[aria-expanded="true"] { background: rgba(255, 255, 255, .14); }
+.hub-ava .hub-ini {
+    width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+    background: linear-gradient(135deg, #7cc4ff, #5ba4e6); color: #0c1622; font-weight: 700;
+}
+.hub-ava .fa-chevron-down { font-size: 11px; color: #8fa3bd; transition: transform .2s; }
+.hub-ava[aria-expanded="true"] .fa-chevron-down { transform: rotate(180deg); }
+.hub-ava .badge {
+    position: absolute; right: -6px; top: -6px; min-width: 20px; height: 20px; padding: 0 6px;
+    border-radius: 999px; background: #5ba4e6; color: #0c1622;
+    font: 700 11.5px/20px "Segoe UI", system-ui, sans-serif; text-align: center;
+    box-shadow: 0 0 0 3px #121c2c;
+}
+.hub-menu {
+    position: absolute; right: 0; top: calc(100% + 10px); width: 260px; padding: 8px; z-index: 1060;
+    border-radius: 18px; background: linear-gradient(180deg, rgba(29, 43, 69, .97), rgba(18, 28, 44, .98));
+    border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+.hub-menu[hidden] { display: none; }
+.hub-menu a, .hub-menu button {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 14px;
+    border: 0; border-radius: 12px; background: none; color: #eef3fa; font-size: 15.5px;
+    text-decoration: none; text-align: left; cursor: pointer;
+}
+.hub-menu a:hover, .hub-menu button:hover, .hub-menu a:focus-visible, .hub-menu button:focus-visible {
+    background: rgba(255, 255, 255, .07); outline: none;
+}
+.hub-menu i { width: 20px; text-align: center; color: #7cc4ff; }
+.hub-menu .fb-n {
+    margin-left: auto; background: #5ba4e6; color: #0c1622; border-radius: 999px;
+    padding: 1px 9px; font-weight: 700; font-size: 12.5px;
+}
+.hub-menu .fb-n:empty { display: none; }
+.hub-menu hr { border: 0; border-top: 1px solid #26354f; margin: 6px 4px; opacity: 1; }
+@media (max-width: 520px) { .hub-ava .hub-name { display: none; } }
+body.theme-night .feedback-button i, body.theme-night .hub-menu i { color: #ffc489; }
+body.theme-night .hub-ava .hub-ini { background: linear-gradient(135deg, #ffc489, #f2a65a); }
+body.theme-night .hub-ava .badge, body.theme-night .hub-menu .fb-n { background: #f2a65a; }
+body.theme-night .hub-ava .fa-chevron-down { color: #a28f74; }
+body.theme-night .hub-menu { background: linear-gradient(180deg, rgba(35, 27, 19, .97), rgba(18, 14, 10, .98)); }
+body.theme-night .hub-menu a, body.theme-night .hub-menu button { color: #f3e3cc; }
+body.theme-night .hub-menu hr { border-top-color: #3a2f22; }
+
+/* Feedback: labelled glass pill so guests know what it is */
+.feedback-button {
+    height: 44px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 18px;
+    margin-left: 6px;
+    background: rgba(255, 255, 255, .08);
+    border: 1px solid rgba(255, 255, 255, .14);
+    color: #e8eef5;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s;
+}
+
+.feedback-button i { color: #7cc4ff; font-size: 1rem; }
+.feedback-button:hover { background: rgba(255, 255, 255, .16); }
+
+/* Staff-only controls (login, inbox, logout): deliberately quiet */
+.navbar .nav-link.nav-ghost {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: #8fa3bd;
+    cursor: pointer;
+}
+
+.navbar .nav-link.nav-ghost i { font-size: 1.05rem; }
+.navbar .nav-link.nav-ghost:hover { color: #e8eef5; }
+@media (max-width: 520px) {
+    .feedback-button { width: 44px; padding: 0; justify-content: center; }
+    .feedback-button span { display: none; }
+}
+
+/* Content area below fixed navbar */
+.container-fluid {
+    padding: 0 20px;
+}
+
+.content-wrapper {
+    margin-top: 62px; /* Height of navbar */
+}
+
+/* ── General button styling ── */
+.btn {
+    background-color: #000000;
+    color: #ffffff;
+    border: 2px solid #ffffff;
+    border-radius: 5px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    text-decoration: none;
+    padding: 10px 20px;
+    margin: 5px;
+}
+
+.btn:hover {
+    background-color: #ffffff;
+    color: #000000;
+    border: 2px solid #000000;
+}
+
+.btn:focus, .btn:active {
+    outline: none;
+    background-color: #000000;
+    color: #ffffff;
+    border: 2px solid #ffffff;
+}
+
+/* ── Main Container ── */
+.main-container {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    height: calc(100vh - 120px);
+}
+
+.btn-container {
+    background-color: #ffffff;
+    padding: 15px 30px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+    display: inline-block;
+}
+
+.btn-container h2, .btn-container p {
+    color: #000000;
+}
+
+/* ── Feedback Modal (glass; warm after dark on the homepage) ── */
+.feedback-modal {
+    --fb-top: rgba(29, 43, 69, .94); --fb-bot: rgba(18, 28, 44, .96);
+    --fb-fg: #eef3fa; --fb-mut: #8fa3bd; --fb-dim: #6f86a3;
+    --fb-acc: #5ba4e6; --fb-acc2: #7cc4ff; --fb-glow: rgba(91, 164, 230, .35);
+}
+body.theme-night .feedback-modal {
+    --fb-top: rgba(35, 27, 19, .95); --fb-bot: rgba(18, 14, 10, .97);
+    --fb-fg: #f3e3cc; --fb-mut: #a28f74; --fb-dim: #8a785f;
+    --fb-acc: #f2a65a; --fb-acc2: #ffc489; --fb-glow: rgba(242, 166, 90, .3);
+}
+.modal-backdrop.show { opacity: .6; background: #050a12; }
+.feedback-modal .modal-dialog { max-width: 520px; }
+.feedback-modal .modal-content {
+    background: linear-gradient(180deg, var(--fb-top), var(--fb-bot));
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, .12); border-radius: 24px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .08);
+    padding: 8px 8px 14px; color: var(--fb-fg);
+    font-family: "Segoe UI", Inter, system-ui, sans-serif;
+}
+.feedback-modal .modal-header {
+    border: 0; padding: 22px 24px 6px; align-items: flex-start; gap: 14px; text-align: left;
+}
+.feedback-modal .fb-ico {
+    flex: 0 0 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--fb-acc2), var(--fb-acc)); color: #0c1622;
+    font-size: 20px; box-shadow: 0 8px 20px var(--fb-glow);
+}
+.feedback-modal .modal-title { font-size: 22px; font-weight: 600; color: var(--fb-fg); margin: 0; }
+.feedback-modal .fb-sub { font-size: 15px; color: var(--fb-mut); margin: 3px 0 0; }
+.feedback-modal .btn-close { filter: invert(1); opacity: .55; margin: 2px 0 0 auto; }
+.feedback-modal .modal-body { padding: 14px 24px 8px; }
+.feedback-modal .form-control {
+    background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 14px; color: var(--fb-fg); padding: 12px 14px; font-size: 16px;
+    min-height: 140px; resize: vertical;
+}
+.feedback-modal .form-control::placeholder { color: var(--fb-dim); }
+.feedback-modal .form-control:focus {
+    background: rgba(255, 255, 255, .08); border-color: var(--fb-acc);
+    box-shadow: 0 0 0 4px var(--fb-glow); color: var(--fb-fg);
+}
+.feedback-modal .fb-foot { display: flex; justify-content: flex-end; margin-top: 14px; }
+.feedback-modal .fb-send {
+    border: 0; border-radius: 999px; padding: 12px 26px; min-height: 48px;
+    font-size: 16px; font-weight: 600; color: #0c1622;
+    background: linear-gradient(135deg, var(--fb-acc2), var(--fb-acc));
+    box-shadow: 0 10px 24px var(--fb-glow);
+    display: inline-flex; align-items: center; gap: 9px;
+}
+.feedback-modal .fb-send:hover, .feedback-modal .fb-send:focus { filter: brightness(1.08); color: #0c1622; }
+
+#feedback-success {
+    display: none;
+    text-align: center;
+    color: var(--fb-fg);
+    font-size: 22px;
+    font-weight: 600;
+    padding: 30px 0 22px;
+}
+#feedback-success .fb-check {
+    width: 74px; height: 74px; margin: 0 auto 18px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 32px; color: #58c98c;
+    background: rgba(88, 201, 140, .14); border: 1px solid rgba(88, 201, 140, .45);
+}
+#feedback-success p { margin: 0; }
+
+/* ── Weather (landing page) ── */
+.weather-container {
+    background-color: #ffffff;
+    width: 100%;
+    padding: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.weather-grid {
+    display: flex;
+    justify-content: space-around;
+    width: 100%;
+    text-align: center;
+    margin: 0 20px;
+}
+
+li {
+    list-style-type: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px;
+    margin: 0 10px;
+    flex: 1;
+    min-width: 150px;
+}
+
+.location-name {
+    font-size: 18px;
+    font-weight: bold;
+    color: #3C6090;
+    margin-bottom: 5px;
+}
+
+.elevation {
+    font-size: 14px;
+    color: #7a7a7a;
+    margin-bottom: 10px;
+}
+
+.temperature {
+    font-size: 48px;
+    font-weight: bold;
+    color: #4a4a4a;
+}
+
+/* ── Navbar brand: home button + lodge monogram, app title centred ── */
+.navbar > .container-fluid { position: relative; }
+.navhub-brand { display: flex; align-items: center; gap: .9rem; }
+.navhub-home { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #7cc4ff; font-size: 1.05rem;
+            text-decoration: none; transition: background .2s, color .2s; }
+.navhub-home:hover { background: rgba(255,255,255,.16); color: #fff; }
+.navhub-lodge { display: flex; align-items: center; gap: .75rem; color: #e8eef5; text-decoration: none; }
+.navhub-lodge:hover { color: #fff; }
+.navhub-lodge img { width: 42px; height: auto; }
+.navhub-lodge-name { display: block; letter-spacing: .28em; font-weight: 600; font-size: .9rem; line-height: 1.1; }
+.navhub-lodge-sub { display: block; letter-spacing: .35em; font-size: .6rem; font-weight: 600; color: #7cc4ff; margin-top: .15rem; }
+.navhub-title { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; white-space: nowrap;
+                max-width: calc(100% - 520px); overflow: hidden; text-overflow: ellipsis;
+             color: #e8eef5; font-weight: 300; letter-spacing: .14em; font-size: 1.45rem; text-transform: uppercase; }
+@media (max-width: 900px) { .navhub-lodge-name, .navhub-lodge-sub { display: none; } .navhub-title { max-width: calc(100% - 300px); } }
+@media (max-width: 520px) { .navhub-title { font-size: 1.05rem; letter-spacing: .1em; } }
+
+/* ── Navbar extras (unit-toggle buttons etc.) ── */
+.navbar-extras {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+.navbar-toggle-btn {
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    padding: 6px 14px;
+    border-radius: 5px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    min-height: 38px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.navbar-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.25);
+    color: #fff;
+}
+
+.navbar-toggle-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.navbar-toggle-btn.active {
+    background: rgba(255, 255, 255, 0.85);
+    color: #212529;
+    border-color: rgba(255, 255, 255, 0.85);
+}
+
+/* ── Phones: one-row title bar ──
+   App pages: home button, full app title, then Feedback + lock (guests) or the avatar (owners,
+   whose menu gets "Send feedback"). Page controls (navbar_extras) drop into a frosted row
+   under the bar that scrolls sideways. The homepage keeps its monogram, clock and °C/°F. */
+.hub-menu-fb { display: none !important; }
+@media (max-width: 600px) {
+    .navbar > .container-fluid { flex-wrap: nowrap; gap: 10px; padding: 0 12px; }
+    .navhub-brand { flex: 0 0 auto; gap: 10px; }
+    .navbar:not(.is-home) .navhub-lodge { display: none; }
+    .navhub-title {
+        position: static; transform: none; max-width: none; flex: 1 1 auto; min-width: 0;
+        text-align: left; font-size: 1.02rem; letter-spacing: .06em; font-weight: 500;
+    }
+    .navbar.is-home .navhub-title { display: none; }
+    .navbar.is-owner .feedback-button { display: none; }
+    .hub-menu-fb { display: flex !important; }
+    .hub-ava { padding: 0; gap: 0; background: none; border: 0; }
+    .hub-ava:hover, .hub-ava[aria-expanded="true"] { background: none; }
+    .hub-ava .hub-ini { width: 40px; height: 40px; }
+    .hub-ava .fa-chevron-down { display: none; }
+
+    .navbar:not(.is-home) .navbar-extras {
+        position: fixed; left: 0; right: 0; top: 62px; z-index: 1020; height: 56px;
+        margin: 0; padding: 8px 12px; gap: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+        background: linear-gradient(180deg, rgba(17, 25, 38, .92), rgba(17, 25, 38, .82));
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border-bottom: 1px solid rgba(255, 255, 255, .08);
+    }
+    .navbar:not(.is-home) .navbar-extras::-webkit-scrollbar { display: none; }
+    .navbar:not(.is-home) .navbar-extras > * { flex: 0 0 auto; }
+    body:has(.navbar:not(.is-home) .navbar-extras) .content-wrapper { margin-top: 118px; }
+}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bdh-sdk"
-version = "0.19.1"
+version = "0.20.0"
 description = "Black Diamond Hub SDK: the plugin contract hub apps import to describe themselves to the hub."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,12 +22,15 @@ classifiers = [
 ha = ["requests>=2.28", "websocket-client>=1.6"]
 # bdh_sdk.qr (site-branded QR codes)
 qr = ["qrcode>=7.4"]
+# bdh_sdk.runtime (an app in its own container; see bdh_sdk/runtime/__init__.py)
+runtime = ["django>=5.1", "uvicorn>=0.30", "whitenoise>=6.6", "requests>=2.28", "websocket-client>=1.6"]
 
 [project.urls]
 Homepage = "https://github.com/blackdiamondlodge/bdh-sdk"
 
 [tool.setuptools]
-packages = ["bdh_sdk"]
+packages = ["bdh_sdk", "bdh_sdk.runtime"]
 
 [tool.setuptools.package-data]
 bdh_sdk = ["*.svg", "chimes/*.wav"]
+"bdh_sdk.runtime" = ["templates/*.html", "templates/*/*.html", "static/bdh/*"]

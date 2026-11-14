@@ -26,6 +26,8 @@ __all__ = [
     "get_entity_states",
     "get_history",
     "get_static",
+    "get_tts",
+    "set_backend",
     "upload_media",
     "ws_commands",
 ]
@@ -37,6 +39,20 @@ TIMEOUT = 10  # seconds
 
 class HAError(Exception):
     """Raised when a Home Assistant call that must succeed fails."""
+
+
+_backend = None
+
+
+def set_backend(backend):
+    """Route every call through ``backend`` (an object with this module's
+    public functions as methods) instead of calling Home Assistant directly.
+
+    Apps running in their own container use the hub broker this way and
+    never see the hub's token. ``None`` restores direct calls.
+    """
+    global _backend
+    _backend = backend
 
 
 def _setting(name, default=None):
@@ -64,6 +80,8 @@ def _headers():
 
 def get_entity_state(entity_id):
     """State dict (``entity_id``, ``state``, ``attributes``) or None on failure."""
+    if _backend is not None:
+        return _backend.get_entity_state(entity_id)
     url = urljoin(_base_url(), f"/api/states/{entity_id}")
     try:
         resp = requests.get(url, headers=_headers(), timeout=TIMEOUT)
@@ -77,6 +95,8 @@ def get_entity_state(entity_id):
 
 def get_entity_states(entity_ids):
     """Dict of entity_id -> state dict for the wanted entities ({} on failure)."""
+    if _backend is not None:
+        return _backend.get_entity_states(entity_ids)
     url = urljoin(_base_url(), "/api/states")
     try:
         resp = requests.get(url, headers=_headers(), timeout=TIMEOUT)
@@ -95,6 +115,8 @@ def get_history(entity_ids, start, end=None):
     Returns entity_id -> list of (iso_timestamp, state), oldest first, or {}
     on failure.
     """
+    if _backend is not None:
+        return _backend.get_history(entity_ids, start, end)
     url = urljoin(_base_url(), f"/api/history/period/{start.isoformat()}")
     params = {
         "filter_entity_id": ",".join(entity_ids),
@@ -129,6 +151,8 @@ def call_service(domain, service, entity_id, extra_data=None):
 
     Pass ``entity_id=None`` for services that take no entity (e.g. ``notify``).
     """
+    if _backend is not None:
+        return _backend.call_service(domain, service, entity_id, extra_data)
     url = urljoin(_base_url(), f"/api/services/{domain}/{service}")
     payload = {} if entity_id is None else {"entity_id": entity_id}
     if extra_data:
@@ -152,6 +176,8 @@ def upload_media(folder, filename, data, content_type):
     Returns the file's ``media-source://`` id. Needs an admin token. Raises
     HAError on failure.
     """
+    if _backend is not None:
+        return _backend.upload_media(folder, filename, data, content_type)
     url = urljoin(_base_url(), "/api/media_source/local_source/upload")
     target = "media-source://media_source/local/" + folder.strip("/")
     try:
@@ -174,6 +200,8 @@ def get_tts(engine_id, message, options=None):
 
     Returns ``(audio bytes, content type)``. Raises HAError on failure.
     """
+    if _backend is not None:
+        return _backend.get_tts(engine_id, message, options)
     url = urljoin(_base_url(), "/api/tts_get_url")
     payload = {"engine_id": engine_id, "message": message}
     if options:
@@ -193,6 +221,8 @@ def get_tts(engine_id, message, options=None):
 
 def get_all_states():
     """Every entity state as a list. Raises HAError on failure."""
+    if _backend is not None:
+        return _backend.get_all_states()
     url = urljoin(_base_url(), "/api/states")
     try:
         resp = requests.get(url, headers=_headers(), timeout=TIMEOUT)
@@ -205,6 +235,8 @@ def get_all_states():
 
 def get_static(path):
     """Bytes of a static file served by HA (e.g. an integration's card JS)."""
+    if _backend is not None:
+        return _backend.get_static(path)
     url = urljoin(_base_url(), path)
     try:
         resp = requests.get(url, timeout=TIMEOUT)
@@ -222,6 +254,8 @@ def ws_commands(*messages):
     Used for data REST doesn't expose (entity / device registries). Raises
     HAError on any failure.
     """
+    if _backend is not None:
+        return _backend.ws_commands(*messages)
     import websocket
 
     base = _base_url().rstrip("/")
