@@ -286,8 +286,14 @@ A new alert plays a chime. `sound=None` (the default) uses the hub's default
 chime, `"none"` (`SILENT`) is quiet, a name from `CHIMES` picks a built-in
 one (`"ding-dong"`, `"soft-bell"`, `"notify"`, `"knock-knock"`, ...), and a
 path on the hub (e.g. `/static/myapp/ring.mp3`) plays your own file. Repeats
-with the same `key` don't chime again, and nothing plays during the hub's night
-window. Settings pages can preview a chime with `BDHChimes.play(name)`.
+with the same `key` don't chime again unless `resound=True`, and nothing plays
+during the hub's night window. Settings pages can preview a chime with
+`BDHChimes.play(name)`.
+
+`speak="Egg timer has expired"` (up to 300 characters) has the screens read
+the text out after the chime, using Home Assistant's text-to-speech (see
+`speakers.tts_audio`). `dismiss(app, key)` closes the alert on every screen,
+for example when it was dealt with on another one.
 
 ```python
 from bdh_sdk.alerts import Alert, push
@@ -392,6 +398,11 @@ failed = announce("Dinner's ready", ["media_player.kitchen"], volume=40,
 and sends Alexa devices an announcement, which has its own tone. It blocks
 until done, returns the speakers that failed and raises
 `speakers.AnnounceError` if all of them did. Announcements never overlap.
+
+`tts_audio(message, voice=None)` returns `(audio bytes, content type)` of HA
+speaking the message (at most 300 characters), cached for repeats. The hub uses
+it to speak alerts on its own screens (`Alert.speak`); it raises `ha.HAError`
+when HA can't make it.
 
 ## Testing helpers
 

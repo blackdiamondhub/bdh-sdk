@@ -11,19 +11,23 @@ afterwards. Alexa devices (the ``alexa_media`` integration) announce with their
 own tone, so they get no chime and keep their own volume.
 
 Announcements are serialized so two at once don't talk over each other.
+
+:func:`tts_audio` returns the spoken message as audio instead, for the hub to
+play on its own screens (see ``Alert.speak`` in :mod:`bdh_sdk.alerts`).
 Needs ``bdh-sdk[ha]``.
 """
 import logging
 import threading
 import time
 import wave
+from collections import OrderedDict
 from importlib import resources
 from urllib.parse import quote
 
 from . import ha
 from .alerts import CHIMES, SILENT
 
-__all__ = ["DEFAULT_TTS", "AnnounceError", "announce", "chime_seconds", "list_speakers"]
+__all__ = ["DEFAULT_TTS", "AnnounceError", "announce", "chime_seconds", "list_speakers", "tts_audio"]
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +40,11 @@ _PLATFORMS = {SONOS: "Sonos", ALEXA: "Alexa"}
 
 _lock = threading.Lock()
 _uploaded = {}
+
+MAX_TTS_TEXT = 300
+_TTS_CACHE_SIZE = 32
+_tts_cache = OrderedDict()
+_tts_lock = threading.Lock()
 
 
 class AnnounceError(Exception):
@@ -158,3 +167,28 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
     if failed and len(failed) == len(speakers):
         raise AnnounceError("announcement failed on every speaker")
     return failed
+
+
+def tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
+    """``message`` spoken by Home Assistant, as ``(audio bytes, content type)``.
+
+    Recent messages are cached, so a repeated alert doesn't call HA again.
+    Raises ValueError for empty or over-long text and ``ha.HAError`` when HA
+    can't make it.
+    """
+    message = (message or "").strip()
+    if not message:
+        raise ValueError("message is required")
+    if len(message) > MAX_TTS_TEXT:
+        raise ValueError(f"message must be at most {MAX_TTS_TEXT} characters")
+    key = (message, tts_engine, voice or "")
+    with _tts_lock:
+        if key in _tts_cache:
+            _tts_cache.move_to_end(key)
+            return _tts_cache[key]
+    result = ha.get_tts(tts_engine, message, {"voice": voice} if voice else None)
+    with _tts_lock:
+        _tts_cache[key] = result
+        while len(_tts_cache) > _TTS_CACHE_SIZE:
+            _tts_cache.popitem(last=False)
+    return result

@@ -91,3 +91,35 @@ class SpeakerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TtsAudioTests(unittest.TestCase):
+    def setUp(self):
+        speakers._tts_cache.clear()
+
+    @mock.patch("bdh_sdk.ha.get_tts", return_value=(b"ID3", "audio/mpeg"))
+    def test_fetches_once_then_caches(self, get_tts):
+        self.assertEqual(speakers.tts_audio(" Egg timer has expired ", voice="AvaNeural"), (b"ID3", "audio/mpeg"))
+        speakers.tts_audio("Egg timer has expired", voice="AvaNeural")
+        get_tts.assert_called_once_with("tts.home_assistant_cloud", "Egg timer has expired", {"voice": "AvaNeural"})
+        speakers.tts_audio("Egg timer has expired")
+        self.assertEqual(get_tts.call_count, 2)
+
+    @mock.patch("bdh_sdk.ha.get_tts", side_effect=lambda e, m, o: (m.encode(), "audio/mpeg"))
+    def test_cache_is_bounded(self, _get_tts):
+        for i in range(speakers._TTS_CACHE_SIZE + 5):
+            speakers.tts_audio(f"timer {i}")
+        self.assertEqual(len(speakers._tts_cache), speakers._TTS_CACHE_SIZE)
+        self.assertNotIn(("timer 0", speakers.DEFAULT_TTS, ""), speakers._tts_cache)
+
+    def test_rejects_empty_or_long_text(self):
+        for bad in ("", "   ", "x" * 301):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                speakers.tts_audio(bad)
+
+    @mock.patch("bdh_sdk.ha.get_tts", side_effect=ha.HAError("down"))
+    def test_errors_are_not_cached(self, get_tts):
+        for _ in range(2):
+            with self.assertRaises(ha.HAError):
+                speakers.tts_audio("hi")
+        self.assertEqual(get_tts.call_count, 2)
