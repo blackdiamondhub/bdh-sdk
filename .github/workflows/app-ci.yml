@@ -180,7 +180,8 @@ jobs:
           # container IP, and a public IP found over STUN) aren't reachable
           # from Chrome on the runner. Without this, WebRTC never connects
           # and every tile waits out its timeout before falling back to MSE.
-          printf 'api:\n  listen: ":1984"\n  origin: "*"\nwebrtc:\n  listen: ":8555"\n  candidates: ["127.0.0.1:8555"]\n  ice_servers: []\n' > /tmp/go2rtc/go2rtc.yaml
+          # Debug logs for the stream path are dumped if the tests fail.
+          printf 'api:\n  listen: ":1984"\n  origin: "*"\nwebrtc:\n  listen: ":8555"\n  candidates: ["127.0.0.1:8555"]\n  ice_servers: []\nlog:\n  level: info\n  api: debug\n  exec: debug\n  streams: debug\n  webrtc: debug\n' > /tmp/go2rtc/go2rtc.yaml
           docker run -d --name go2rtc -p 1984:1984 -p 8555:8555 -v /tmp/go2rtc:/config alexxit/go2rtc
           for i in $(seq 1 30); do
             curl -sf http://localhost:1984/api/streams > /dev/null && { echo "go2rtc is ready"; exit 0; }
@@ -191,3 +192,9 @@ jobs:
       - name: Selenium tests
         working-directory: hub
         run: python manage.py test "$TEST_MODULE" --settings=BlackDiamondHub.settings_test --tag=selenium -v 2
+
+      - name: Dump go2rtc logs
+        if: ${{ failure() && inputs.go2rtc }}
+        run: |
+          nproc; uptime
+          docker logs -t go2rtc 2>&1 | tail -n 600
