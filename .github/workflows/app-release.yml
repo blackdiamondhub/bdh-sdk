@@ -3,7 +3,9 @@ name: Hub app release
 # Reusable release workflow for hub app repos. The first time a version in
 # pyproject.toml lands on main it tags v<version>, builds the wheel and
 # publishes a GitHub release whose notes include the ready-to-paste line for
-# the hub's sites/<site>/apps.txt.
+# the hub's sites/<site>/apps.txt. It then attests the wheel's build
+# provenance and opens an auto-merging PR adding the version to
+# blackdiamondlodge/bdh-app-catalog.
 #
 #   on:
 #     push:
@@ -13,9 +15,22 @@ name: Hub app release
 #       uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-release.yml@v0
 #       permissions:
 #         contents: write
+#         id-token: write      # build provenance attestation
+#         attestations: write
+#       secrets: inherit       # CATALOG_TOKEN
+#
+# Both extras are optional: without id-token/attestations the wheel isn't
+# attested, and without CATALOG_TOKEN the catalog PR is skipped. Each logs a
+# warning and the release still succeeds.
 
 on:
   workflow_call:
+    secrets:
+      CATALOG_TOKEN:
+        description: >-
+          Token that can push branches and open PRs on
+          blackdiamondlodge/bdh-app-catalog (contents + pull requests write).
+        required: false
     outputs:
       released:
         description: "true when a new release was published"
@@ -107,3 +122,66 @@ jobs:
 
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "requirement=${requirement}" >> "$GITHUB_OUTPUT"
+      # The job can only mint an OIDC token when the caller grants
+      # id-token: write; requesting it here would fail every caller that
+      # doesn't, so detect it instead.
+      - name: Check attestation permissions
+        id: oidc
+        if: steps.publish.outputs.released == 'true'
+        run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Wheel not attested: grant 'id-token: write' and 'attestations: write' to the app-release job."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Attest build provenance
+        id: attest
+        if: steps.oidc.outputs.available == 'true'
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.whl
+
+      - name: Add to the app catalog
+        if: steps.publish.outputs.released == 'true'
+        env:
+          CATALOG_TOKEN: ${{ secrets.CATALOG_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CATALOG_TOKEN}" ]; then
+            echo "::warning::CATALOG_TOKEN not available; ${TAG} was not added to blackdiamondlodge/bdh-app-catalog. Pass it with 'secrets: inherit', or run scripts/sync_releases.py there."
+            exit 0
+          fi
+          changelog=$(git log -1 --format=%s)
+          wheel=$(ls "$PWD"/dist/*.whl)
+          git clone -q "https://x-access-token:${CATALOG_TOKEN}@github.com/blackdiamondlodge/bdh-app-catalog.git" "$RUNNER_TEMP/catalog"
+          cd "$RUNNER_TEMP/catalog"
+
+          args=(--wheel "$wheel" --repo "$GITHUB_REPOSITORY" --tag "$TAG"
+                --changelog "$changelog" --github-output "$RUNNER_TEMP/catalog.out")
+          if [ -n "${ATTESTATION_URL}" ]; then
+            args+=(--attestation-url "$ATTESTATION_URL")
+          fi
+          python scripts/add_version.py "${args[@]}"
+          app_id=$(sed -n 's/^app_id=//p' "$RUNNER_TEMP/catalog.out")
+          version=$(sed -n 's/^version=//p' "$RUNNER_TEMP/catalog.out")
+          branch="add/${app_id}-${version}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b "$branch"
+          git commit -q -am "Add ${app_id} ${version}"
+          git push -q --force origin "$branch"
+
+          export GH_TOKEN="$CATALOG_TOKEN"
+          repo=blackdiamondlodge/bdh-app-catalog
+          if ! gh pr view "$branch" --repo "$repo" --json number >/dev/null 2>&1; then
+            gh pr create --repo "$repo" --base main --head "$branch" \
+              --title "Add ${app_id} ${version}" \
+              --body "Released by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}: ${changelog}"
+          fi
+          gh pr merge "$branch" --repo "$repo" --squash --auto --delete-branch

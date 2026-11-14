@@ -479,12 +479,29 @@ Inputs: `app_id` (required), `hub_ref` (default `main`), `python-version`
 `v0`), `selenium` (default true), `go2rtc` (default false). Optional secret `hub_token` if the hub repo is private.
 
 `.github/workflows/app-release.yml` is the matching reusable release
-workflow. Call it on pushes to `main` (with `permissions: contents: write`).
+workflow. Call it on pushes to `main`:
+
+```yaml
+jobs:
+  release:
+    uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-release.yml@v0
+    permissions:
+      contents: write
+      id-token: write      # build provenance attestation
+      attestations: write
+    secrets: inherit       # CATALOG_TOKEN
+```
+
 The first time a `pyproject.toml` version lands on main it tags
 `v<version>`, builds the wheel and publishes a GitHub release. The release
 notes include the hashed line to paste into the hub's
 `sites/<site>/apps.txt`, which is also available as the `requirement`
-output.
+output. It then attests the wheel with `actions/attest-build-provenance` and
+opens an auto-merging PR adding the version to
+[bdh-app-catalog](https://github.com/blackdiamondlodge/bdh-app-catalog).
+Both are optional: without `id-token`/`attestations` the wheel isn't
+attested, and without the `CATALOG_TOKEN` secret (contents and pull requests
+write on bdh-app-catalog) the catalog PR is skipped. Each logs a warning.
 
 ## Development
 
