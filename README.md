@@ -442,6 +442,26 @@ Manifest fields for the app store: `permissions`, `network`
 `bdh_sdk.testing.FakeBroker` is an in-process broker for app tests: register
 handlers with `.on(op, fn)` and check `.calls`.
 
+`python -m bdh_sdk.runtime.manage <command>` runs Django management commands
+in the container (without starting the app's server or background workers).
+
+### Moving an app's rows into its container
+
+An app that used to run in the hub keeps its rows in the hub's database.
+`bdh_sdk.appdata` moves them as a Django JSON fixture (one app label only):
+
+```sh
+# in the hub (its own DJANGO_SETTINGS_MODULE)
+python -m bdh_sdk.appdata export cameras -o cameras.json
+# copy cameras.json into the app's data volume, then in the container:
+python -m bdh_sdk.runtime.manage import_app_data /data/cameras.json [--replace]
+```
+
+`export_app_data [label] [-o file]` is the container-side twin, and
+`python -m bdh_sdk.appdata import FILE` migrates a fresh container before
+loading. Imports run in one transaction, refuse rows of other apps and reset
+sequences; `--replace` deletes the app's existing rows first.
+
 ## Reusable CI for app repos
 
 `.github/workflows/app-ci.yml` is a reusable workflow. In an app repo:
