@@ -8,6 +8,7 @@ import logging
 
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.urls import NoReverseMatch, reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -50,6 +51,51 @@ def hook(request):
         log.exception("hook %s failed", body["hook"])
         return JsonResponse({"error": "hook failed"}, status=500)
     return JsonResponse({"result": result})
+
+
+def _url(name):
+    try:
+        return reverse(name)
+    except NoReverseMatch:
+        log.warning("url %r does not reverse", name)
+        return None
+
+
+def describe(spec):
+    """What the hub needs to show this app without importing it."""
+    setting_fields = ("key", "label", "type", "default", "help", "minimum", "maximum", "unit")
+    return {
+        **spec.manifest(),
+        "tiles": [
+            {"title": t.title, "url": _url(t.url_name), "url_name": t.url_name, "icon": t.icon,
+             "section": t.section, "subtitle": t.subtitle, "order": t.order,
+             "modes": sorted(t.modes)}
+            for t in spec.tiles
+        ],
+        "hooks": [h for h in ("status", "shortcuts", "run_shortcut", "run_action", "stay", "card")
+                  if getattr(spec, h)],
+        "settings": [
+            {**{f: getattr(s, f) for f in setting_fields},
+             "choices": [list(c) for c in s.options] if not s.choices_from else None,
+             "dynamic_choices": bool(s.choices_from)}
+            for s in spec.settings
+        ],
+        "settings_pages": [
+            {"title": p.title, "url": _url(p.url_name), "subtitle": p.subtitle, "icon": p.icon}
+            for p in spec.settings_pages
+        ],
+        "stat_keys": [list(k) for k in spec.stat_keys],
+    }
+
+
+@require_GET
+def manifest(request):
+    """``describe()`` of this app, for the hub."""
+    from . import app_spec
+
+    if not _internal(request):
+        return JsonResponse({"error": "forbidden"}, status=403)
+    return JsonResponse(describe(app_spec()))
 
 
 @csrf_exempt
