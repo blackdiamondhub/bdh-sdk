@@ -31,7 +31,7 @@ from .plugins import (
 from .auth import is_admin
 from .provides import BACKGROUNDS, SEASON, STATS, Background, SeasonHint, Stat
 
-__version__ = "0.18.1"
+__version__ = "0.19.0"
 
 __all__ = [
     "__version__",

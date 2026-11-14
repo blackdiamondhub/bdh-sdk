@@ -169,6 +169,28 @@ def upload_media(folder, filename, data, content_type):
     return resp.json()["media_content_id"]
 
 
+def get_tts(engine_id, message, options=None):
+    """Speak ``message`` with the TTS entity ``engine_id``.
+
+    Returns ``(audio bytes, content type)``. Raises HAError on failure.
+    """
+    url = urljoin(_base_url(), "/api/tts_get_url")
+    payload = {"engine_id": engine_id, "message": message}
+    if options:
+        payload["options"] = options
+    try:
+        resp = requests.post(url, headers=_headers(), json=payload, timeout=TIMEOUT)
+        if resp.status_code != 200:
+            raise HAError(f"HA returned {resp.status_code} for TTS: {resp.text[:200]}")
+        # "url" uses HA's external URL; "path" works from the hub's LAN address.
+        audio = requests.get(urljoin(_base_url(), resp.json()["path"]), headers=_headers(), timeout=30)
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        raise HAError(f"TTS failed: {exc}") from exc
+    if audio.status_code != 200 or not audio.content:
+        raise HAError(f"HA returned {audio.status_code} fetching TTS audio")
+    return audio.content, audio.headers.get("Content-Type", "audio/mpeg")
+
+
 def get_all_states():
     """Every entity state as a list. Raises HAError on failure."""
     url = urljoin(_base_url(), "/api/states")

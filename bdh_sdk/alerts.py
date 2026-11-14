@@ -8,13 +8,18 @@ restarts the timer, and a different alert replaces the one on screen.
 
 A new alert plays ``sound``: ``None`` for the hub's default chime,
 :data:`SILENT` for none, one of :data:`CHIMES`, or a path to an audio file
-on the hub. Repeats with the same ``key`` stay quiet, and so does the hub's
-night window.
+on the hub. Set ``speak`` and the screens then read it out (Home Assistant
+text-to-speech, see :func:`bdh_sdk.speakers.tts_audio`). Repeats with the
+same ``key`` stay quiet unless ``resound`` is set, and the hub's night window
+is always quiet.
 
-The hub installs the delivery function with :func:`set_sender`; without one
-(unit tests, scripts) pushing only logs at debug level. :func:`push` is safe
-to call from any thread, including one running its own event loop, and never
-blocks.
+:func:`dismiss` closes an alert on every screen, e.g. once it has been dealt
+with somewhere else.
+
+The hub installs the delivery functions with :func:`set_sender`; without them
+(unit tests, scripts) pushing only logs at debug level. :func:`push` and
+:func:`dismiss` are safe to call from any thread, including one running its
+own event loop, and never block.
 
 This module does not import Django at import time.
 """
@@ -22,11 +27,12 @@ import logging
 import re
 from dataclasses import asdict, dataclass
 
-__all__ = ["CHIMES", "SILENT", "Alert", "apush", "push", "set_sender"]
+__all__ = ["CHIMES", "SILENT", "Alert", "apush", "dismiss", "push", "set_sender"]
 
 log = logging.getLogger(__name__)
 
 MAX_TTL = 600
+MAX_SPEAK = 300
 
 _APP_ID = re.compile(r"^[a-z0-9_]+$")
 
@@ -52,6 +58,8 @@ class Alert:
     ttl: int = 60
     wake: bool = True
     sound: str | None = None
+    speak: str = ""
+    resound: bool = False
 
     def __post_init__(self):
         if not isinstance(self.app, str) or not _APP_ID.match(self.app):
@@ -68,21 +76,26 @@ class Alert:
         snd = self.sound
         if snd is not None and snd != SILENT and snd not in CHIMES and not _hub_path(snd):
             raise ValueError(f"sound must be None, {SILENT!r}, a chime name or a path on the hub, got {snd!r}")
+        if not isinstance(self.speak, str) or len(self.speak) > MAX_SPEAK:
+            raise ValueError(f"speak must be text of at most {MAX_SPEAK} characters")
 
     def as_dict(self):
         return asdict(self)
 
 
 _sender = None
+_dismisser = None
 
 
-def set_sender(sender):
-    """Install the hub's delivery function; ``None`` removes it.
+def set_sender(sender, dismisser=None):
+    """Install the hub's delivery functions; ``None`` removes them.
 
-    ``sender(alert)`` must be thread-safe and must not block.
+    ``sender(alert)`` and ``dismisser(app, key)`` must be thread-safe and must
+    not block.
     """
-    global _sender
+    global _sender, _dismisser
     _sender = sender
+    _dismisser = dismisser
 
 
 def push(alert: Alert) -> None:
@@ -98,3 +111,14 @@ def push(alert: Alert) -> None:
 async def apush(alert: Alert) -> None:
     """:func:`push` for async code; it doesn't block either."""
     push(alert)
+
+def dismiss(app: str, key: str) -> None:
+    """Close the alert ``key`` from ``app`` on every screen showing it."""
+    if not isinstance(app, str) or not _APP_ID.match(app):
+        raise ValueError(f"invalid app id: {app!r}")
+    if not key or not isinstance(key, str):
+        raise ValueError("alert key is required")
+    if _dismisser is None:
+        log.debug("no alert dismisser installed; dropping %s", key)
+        return
+    _dismisser(app, key)

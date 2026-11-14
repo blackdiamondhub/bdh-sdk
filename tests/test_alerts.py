@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from bdh_sdk.alerts import CHIMES, SILENT, Alert, apush, push, set_sender
+from bdh_sdk.alerts import CHIMES, SILENT, Alert, apush, dismiss, push, set_sender
 
 
 def make(**kw):
@@ -21,6 +21,23 @@ class AlertTests(unittest.TestCase):
         asyncio.run(apush(alert))
         self.assertEqual(self.sent, [alert, alert])
         self.assertEqual(alert.as_dict()["ttl"], 60)
+
+    def test_dismiss_reaches_the_dismisser(self):
+        closed = []
+        set_sender(self.sent.append, lambda app, key: closed.append((app, key)))
+        dismiss("timers", "timer:3")
+        self.assertEqual(closed, [("timers", "timer:3")])
+        set_sender(self.sent.append)
+        dismiss("timers", "timer:3")  # no dismisser: a no-op
+        with self.assertRaises(ValueError):
+            dismiss("Timers", "timer:3")
+
+    def test_speak_is_short_text(self):
+        self.assertEqual(make(speak="Egg timer has expired", resound=True).as_dict()["speak"],
+                         "Egg timer has expired")
+        for bad in ("x" * 301, None):
+            with self.subTest(speak=bad), self.assertRaises(ValueError):
+                make(speak=bad)
 
     def test_without_a_sender_push_is_a_no_op(self):
         set_sender(None)
