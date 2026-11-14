@@ -31,7 +31,12 @@ SCRIPT = '''
 import json, os
 from bdh_sdk import identity, plugins, runtime
 
-spec = plugins.PluginSpec(id="demo", app="demoapp", urls="demoapp.urls", status="demoapp.status")
+spec = plugins.PluginSpec(
+    id="demo", app="demoapp", urls="demoapp.urls", status="demoapp.status",
+    tiles=(plugins.Tile(title="Demo", url_name="demo_home", icon="demo/icon.svg", section="more"),),
+    settings=(plugins.Setting(key="color", label="Colour", type="choice", choices=("red", "blue")),),
+    permissions=("alerts",),
+)
 runtime.app_spec = lambda: spec
 runtime.setup()
 
@@ -58,6 +63,8 @@ out["health"] = c.get("/_bdh/health").json()
 out["unsigned"] = c.get("/demo/").status_code
 out["visitor"] = get("/demo/", {"u": "sam", "staff": True, "mode": "owner"}, Cookie="x=1").json()
 out["anon"] = get("/demo/").json()
+out["manifest"] = c.get("/_bdh/manifest", headers=identity.signed_headers(TOKEN, "GET", "/_bdh/manifest", body=b"")).json()
+out["manifest_unsigned"] = c.get("/_bdh/manifest").status_code
 out["hook"] = post("/_bdh/hook", {"hook": "status"}).json()
 out["hook_unsigned_body"] = post("/_bdh/hook", {"hook": "status"}, sign_body=False).status_code
 out["hook_missing"] = post("/_bdh/hook", {"hook": "card"}).status_code
@@ -96,6 +103,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(out["unsigned"], 403)
         self.assertEqual(out["visitor"], {"user": "sam", "staff": True, "mode": "owner", "cookie": "1"})
         self.assertEqual(out["anon"], {"user": "", "staff": False, "mode": "guest", "cookie": ""})
+        m = out["manifest"]
+        self.assertEqual(m["id"], "demo")
+        self.assertEqual(m["permissions"], ["alerts"])
+        self.assertEqual(m["hooks"], ["status"])
+        self.assertEqual(m["tiles"][0]["url"], "/demo/")
+        self.assertEqual(m["settings"][0]["choices"], [["red", "red"], ["blue", "blue"]])
+        self.assertEqual(out["manifest_unsigned"], 403)
         self.assertEqual(out["hook"], {"result": {"text": "all good", "level": "info"}})
         self.assertEqual(out["hook_unsigned_body"], 403)
         self.assertEqual(out["hook_missing"], 404)
