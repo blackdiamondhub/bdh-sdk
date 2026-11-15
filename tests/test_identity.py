@@ -42,6 +42,53 @@ class SigningTests(unittest.TestCase):
         self.assertIsNone(ident.verify(TOKEN, "POST", "/_bdh/hook", h, body=b'{"a":2}', now=NOW))
         self.assertIsNone(ident.verify(TOKEN, "POST", "/_bdh/hook", h, now=NOW))
 
+    def test_v2_headers_alongside_v1(self):
+        h = ident.signed_headers(TOKEN, "GET", "/x/?a=1", {"u": "steve"}, now=NOW)
+        self.assertTrue(h[ident.HEADER_NONCE])
+        self.assertNotEqual(h[ident.HEADER_NONCE],
+                            ident.signed_headers(TOKEN, "GET", "/x/?a=1", now=NOW)[ident.HEADER_NONCE])
+        # What an SDK before 0.27 checks still holds.
+        self.assertEqual(h[ident.HEADER_SIGNATURE],
+                         ident.sign(TOKEN, "GET", "/x/?a=1", NOW, h[ident.HEADER_IDENTITY]))
+
+    def test_replayed_nonce_is_refused(self):
+        cache = ident.NonceCache()
+        h = ident.signed_headers(TOKEN, "GET", "/x/", {"u": "steve"}, now=NOW)
+        self.assertEqual(ident.verify(TOKEN, "GET", "/x/", h, now=NOW, nonces=cache), {"u": "steve"})
+        self.assertIsNone(ident.verify(TOKEN, "GET", "/x/", h, now=NOW + 1, nonces=cache))
+        fresh = ident.signed_headers(TOKEN, "GET", "/x/", {"u": "steve"}, now=NOW)
+        self.assertIsNotNone(ident.verify(TOKEN, "GET", "/x/", fresh, now=NOW + 1, nonces=cache))
+
+    def test_v2_tampering_is_refused(self):
+        h = ident.signed_headers(TOKEN, "POST", "/a/?q=1", {"u": "guest"}, now=NOW)
+        cases = {
+            "other nonce": ({**h, ident.HEADER_NONCE: "other"}, "/a/?q=1"),
+            "nonce dropped": ({k: v for k, v in h.items() if k != ident.HEADER_NONCE}, "/a/?q=1"),
+            "v2 signature dropped": ({k: v for k, v in h.items() if k != ident.HEADER_SIGNATURE_V2},
+                                     "/a/?q=1"),
+            "other query": (h, "/a/?q=2"),
+        }
+        for name, (headers, path) in cases.items():
+            with self.subTest(name):
+                self.assertIsNone(ident.verify(TOKEN, "POST", path, headers, now=NOW,
+                                               nonces=ident.NonceCache()))
+
+    def test_legacy_v1_still_accepted(self):
+        h = ident.signed_headers(TOKEN, "GET", "/x/", {"u": "steve"}, now=NOW)
+        legacy = {k: v for k, v in h.items()
+                  if k not in (ident.HEADER_NONCE, ident.HEADER_SIGNATURE_V2)}
+        with self.assertLogs("bdh_sdk.identity", "DEBUG"):
+            self.assertEqual(ident.verify(TOKEN, "GET", "/x/", legacy, now=NOW), {"u": "steve"})
+
+    def test_nonce_cache_expires_and_is_bounded(self):
+        cache = ident.NonceCache(size=2)
+        self.assertTrue(cache.add("a", NOW + 30, now=NOW))
+        self.assertFalse(cache.add("a", NOW + 30, now=NOW + 29))
+        self.assertTrue(cache.add("a", NOW + 70, now=NOW + 31))
+        cache.add("b", NOW + 70, now=NOW + 31)
+        cache.add("c", NOW + 70, now=NOW + 31)
+        self.assertEqual(list(cache._seen), ["b", "c"])
+
     def test_app_token_is_per_app_and_generation(self):
         a = ident.app_token("secret", "cameras", 1)
         self.assertEqual(a, ident.app_token("secret", "cameras", 1))
@@ -83,6 +130,13 @@ class MiddlewareTests(unittest.TestCase):
         self.assertEqual(str(req.user), "steve")
         self.assertEqual((req.bdh_mode, req.bdh_stay_key, req.bdh_hub_origin, req.bdh_internal),
                          ("owner", "s1", "http://hub:8000", False))
+
+    def test_replayed_request_is_refused(self):
+        mw = ident.IdentityMiddleware(lambda r: r)
+        h = ident.signed_headers(TOKEN, "POST", "/x/", {"u": "steve"})
+        req = _request("/x/", h, "POST")
+        self.assertIs(mw(req), req)
+        self.assertEqual(mw(_request("/x/", h, "POST")).status_code, 403)
 
     def test_query_string_is_signed(self):
         mw = ident.IdentityMiddleware(lambda r: r)

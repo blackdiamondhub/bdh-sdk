@@ -10,11 +10,21 @@ headers instead:
     visitor is using}``; ``u``/``n``/``staff`` are absent for anonymous visitors.
 ``X-BDH-Time``
     Unix seconds when the hub signed the request.
-``X-BDH-Signature``
+``X-BDH-Nonce``
+    A random value, new for every request.
+``X-BDH-Signature-V2``
     hex HMAC-SHA256, keyed with the app's token, over
-    ``method\\npath\\ntime\\nidentity\\nbody-hash``. ``body-hash`` is the hex
-    SHA-256 of the body for the hub's own ``/_bdh/`` calls, ``-`` for
-    proxied visitor requests (they stream).
+    ``v2\\nmethod\\npath\\ntime\\nnonce\\nidentity\\nbody-hash``. ``path``
+    includes the query string. ``body-hash`` is the hex SHA-256 of the body
+    for the hub's own ``/_bdh/`` calls, ``-`` for proxied visitor requests
+    (verifying those would make the app buffer every upload).
+``X-BDH-Signature``
+    The legacy (v1) signature: the same minus ``v2`` and the nonce. The hub
+    still sends it so apps on an SDK before 0.27 keep working; they ignore
+    the v2 headers.
+
+A v2 signature is good once: the app remembers nonces for the
+:data:`MAX_SKEW` window and refuses a repeat.
 
 :class:`IdentityMiddleware` checks the signature and sets ``request.user``
 to a :class:`HubUser` (or :data:`ANONYMOUS`) and ``request.bdh_mode`` /
@@ -25,20 +35,31 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
+import secrets
+import threading
 import time
+from collections import OrderedDict
+
+log = logging.getLogger(__name__)
 
 __all__ = [
-    "ANONYMOUS", "HEADER_IDENTITY", "HEADER_SIGNATURE", "HEADER_TIME", "MAX_SKEW",
-    "AnonymousHubUser", "HubUser", "IdentityMiddleware", "app_token", "decode_identity",
-    "encode_identity", "sign", "signed_headers", "verify",
+    "ANONYMOUS", "HEADER_IDENTITY", "HEADER_NONCE", "HEADER_SIGNATURE", "HEADER_SIGNATURE_V2",
+    "HEADER_TIME", "MAX_SKEW", "AnonymousHubUser", "HubUser", "IdentityMiddleware", "NonceCache",
+    "app_token", "decode_identity", "encode_identity", "sign", "sign_v2", "signed_headers", "verify",
 ]
 
 HEADER_IDENTITY = "X-BDH-Identity"
 HEADER_TIME = "X-BDH-Time"
 HEADER_SIGNATURE = "X-BDH-Signature"
-# Seconds a signature stays valid; the hub and the app share a clock.
-MAX_SKEW = 60
+HEADER_NONCE = "X-BDH-Nonce"
+HEADER_SIGNATURE_V2 = "X-BDH-Signature-V2"
+# Seconds a signature stays valid; the hub and the app share a clock, and the
+# hub signs each request just before sending it.
+MAX_SKEW = 30
+# Nonces remembered at once; far more than 2 * MAX_SKEW seconds of traffic.
+MAX_NONCES = 10_000
 NO_BODY = "-"
 INTERNAL_PREFIX = "/_bdh/"
 
@@ -80,20 +101,76 @@ def sign(token, method, path, ts, identity="", digest=NO_BODY):
     return hmac.new(_bytes(token), msg.encode(), hashlib.sha256).hexdigest()
 
 
+def sign_v2(token, method, path, ts, nonce, identity="", digest=NO_BODY):
+    msg = "\n".join(("v2", method.upper(), path, str(int(ts)), nonce, identity or "", digest))
+    return hmac.new(_bytes(token), msg.encode(), hashlib.sha256).hexdigest()
+
+
 def signed_headers(token, method, path, identity=None, body=None, now=None):
     """Headers the hub sends to an app. ``body`` (bytes) is signed when given."""
     ts = int(now if now is not None else time.time())
     ident = encode_identity(identity)
     digest = NO_BODY if body is None else body_hash(body)
-    headers = {HEADER_TIME: str(ts), HEADER_SIGNATURE: sign(token, method, path, ts, ident, digest)}
+    nonce = secrets.token_urlsafe(16)
+    headers = {
+        HEADER_TIME: str(ts),
+        HEADER_SIGNATURE: sign(token, method, path, ts, ident, digest),
+        HEADER_NONCE: nonce,
+        HEADER_SIGNATURE_V2: sign_v2(token, method, path, ts, nonce, ident, digest),
+    }
     if ident:
         headers[HEADER_IDENTITY] = ident
     return headers
 
 
-def verify(token, method, path, headers, body=None, now=None, max_skew=MAX_SKEW):
+class NonceCache:
+    """Unexpired nonces, at most ``size`` of them (the oldest go first).
+
+    In-process is enough: the runtime serves an app with one uvicorn worker.
+    """
+
+    def __init__(self, size=MAX_NONCES):
+        self.size = size
+        self._seen = OrderedDict()
+        self._lock = threading.Lock()
+
+    def add(self, nonce, expires, now=None):
+        """Remember ``nonce`` until ``expires``; False if it was already seen."""
+        with self._lock:
+            now = time.time() if now is None else now
+            while self._seen:
+                oldest, until = next(iter(self._seen.items()))
+                if until >= now and len(self._seen) < self.size:
+                    break
+                del self._seen[oldest]
+            if nonce in self._seen:
+                return False
+            self._seen[nonce] = expires
+            return True
+
+
+#: The cache :func:`verify` uses unless given another.
+NONCES = NonceCache()
+_legacy_warned = False
+
+
+def _legacy_seen():
+    global _legacy_warned
+    if not _legacy_warned:
+        _legacy_warned = True
+        log.warning("accepting a v1 (no nonce) hub signature; upgrade the hub so requests "
+                    "can't be replayed")
+    else:
+        log.debug("accepting a v1 (no nonce) hub signature")
+
+
+def verify(token, method, path, headers, body=None, now=None, max_skew=MAX_SKEW, nonces=None):
     """The identity dict (``{}`` for anonymous) if ``headers`` carry a valid
-    signature, else None. ``body`` (bytes) must match when given."""
+    signature, else None. ``body`` (bytes) must match when given.
+
+    A v2 signature's nonce is recorded in ``nonces`` (default :data:`NONCES`)
+    and a repeat is refused.
+    """
     if not token:
         return None
     try:
@@ -105,9 +182,23 @@ def verify(token, method, path, headers, body=None, now=None, max_skew=MAX_SKEW)
         return None
     ident = headers.get(HEADER_IDENTITY) or ""
     digest = NO_BODY if body is None else body_hash(body)
-    expected = sign(token, method, path, ts, ident, digest)
-    if not hmac.compare_digest(expected, headers.get(HEADER_SIGNATURE) or ""):
-        return None
+    nonce = headers.get(HEADER_NONCE) or ""
+    signature_v2 = headers.get(HEADER_SIGNATURE_V2) or ""
+    if nonce or signature_v2:
+        expected = sign_v2(token, method, path, ts, nonce, ident, digest)
+        if not nonce or not hmac.compare_digest(expected, signature_v2):
+            return None
+        cache = NONCES if nonces is None else nonces
+        if not cache.add(nonce, ts + max_skew, now=current):
+            log.warning("refused a replayed hub signature for %s %s", method, path)
+            return None
+    else:
+        # TODO: refuse v1 signatures (no nonce, replayable for MAX_SKEW
+        # seconds) once every hub sends v2.
+        expected = sign(token, method, path, ts, ident, digest)
+        if not hmac.compare_digest(expected, headers.get(HEADER_SIGNATURE) or ""):
+            return None
+        _legacy_seen()
     try:
         return decode_identity(ident) or {}
     except (ValueError, TypeError):
