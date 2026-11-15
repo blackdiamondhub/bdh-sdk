@@ -1,7 +1,9 @@
 name: Hub app CI
 
 # Reusable workflow for hub app repos. Builds the app as a wheel, installs it
-# next to a checkout of the hub and checks that the hub picks it up.
+# next to a checkout of the hub and checks that the hub picks it up. The image
+# job builds the app's container image the way the platform will (bdh-sdk
+# builder/) and smoke-tests it like the supervisor runs it.
 #
 #   jobs:
 #     hub:
@@ -45,6 +47,26 @@ on:
         required: false
         type: boolean
         default: false
+      image:
+        description: Build and smoke-test the app's container image.
+        required: false
+        type: boolean
+        default: true
+      hub_api:
+        description: Hub API (bdh-app-runtime:hub-api-<N>) the image builds on.
+        required: false
+        type: number
+        default: 2
+      smoke_env:
+        description: Extra environment for the image smoke test, one KEY=VALUE per line.
+        required: false
+        type: string
+        default: ""
+      smoke_settle:
+        description: Seconds the smoke test lets background workers run before measuring memory.
+        required: false
+        type: number
+        default: 5
     secrets:
       hub_token:
         description: Token to read BlackDiamondHub if it is private. Defaults to GITHUB_TOKEN.
@@ -198,3 +220,45 @@ jobs:
         run: |
           nproc; uptime
           docker logs -t go2rtc 2>&1 | tail -n 600
+
+  image:
+    if: ${{ inputs.image }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: blackdiamondlodge/bdh-sdk
+          ref: ${{ inputs.sdk_ref }}
+          path: .bdh-sdk
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+
+      - name: Lock, build and smoke-test the image
+        env:
+          HUB_API: ${{ inputs.hub_api }}
+          SMOKE_ENV: ${{ inputs.smoke_env }}
+          SMOKE_SETTLE: ${{ inputs.smoke_settle }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$SMOKE_ENV" | sed '/^[[:space:]]*$/d' > "$RUNNER_TEMP/smoke.env"
+          SMOKE_ENV_FILE="$RUNNER_TEMP/smoke.env" bash .bdh-sdk/builder/app_artifacts.sh \
+            dist/*.whl pyproject.toml "$RUNNER_TEMP/image"
+          {
+            echo "### Image smoke test"
+            echo '```json'
+            cat "$RUNNER_TEMP/image/smoke.json"
+            echo '```'
+            echo "### Locked dependencies"
+            echo '```'
+            cat "$RUNNER_TEMP/image/bdh-lock.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

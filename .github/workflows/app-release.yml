@@ -1,11 +1,22 @@
 name: Hub app release
 
 # Reusable release workflow for hub app repos. The first time a version in
-# pyproject.toml lands on main it tags v<version>, builds the wheel and
-# publishes a GitHub release whose notes include the ready-to-paste line for
-# the hub's sites/<site>/apps.txt. It then attests the wheel's build
-# provenance and opens an auto-merging PR adding the version to
-# blackdiamondlodge/bdh-app-catalog.
+# pyproject.toml lands on main it tags v<version> and publishes a GitHub
+# release with what the platform needs to build the app's image:
+#
+#   - the wheel (and sdist)
+#   - bdh-lock.txt: the app's third-party dependencies, hash-locked against
+#     the current bdh-app-runtime base (only what the base doesn't provide)
+#   - bdh-app.json: [tool.bdh] build config (apt, pip_exclude, custom_base)
+#     and the app's manifest as its image reports it
+#   - bdh-extra.Dockerfile: only for custom_base apps
+#
+# Before publishing it builds the image from these files with bdh-sdk's
+# builder and smoke-tests it, and it attests every asset's build provenance.
+# App repos build no images and push nothing else: the central builder in
+# blackdiamondlodge/bdh-app-catalog verifies the attestations, builds,
+# smoke-tests, pushes and attests ghcr.io/blackdiamondlodge/bdh-app-<id>, and
+# opens the catalog PR (see bdh-sdk builder/README.md).
 #
 #   on:
 #     push:
@@ -15,34 +26,43 @@ name: Hub app release
 #       uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-release.yml@v0
 #       permissions:
 #         contents: write
-#         id-token: write      # build provenance attestation
+#         id-token: write      # build provenance attestation (required)
 #         attestations: write
-#       secrets: inherit       # CATALOG_TOKEN
-#
-# Both extras are optional: without id-token/attestations the wheel isn't
-# attested, and without CATALOG_TOKEN the catalog PR is skipped. Each logs a
-# warning and the release still succeeds.
 
 on:
   workflow_call:
-    secrets:
-      CATALOG_TOKEN:
-        description: >-
-          Token that can push branches and open PRs on
-          blackdiamondlodge/bdh-app-catalog (contents + pull requests write).
+    inputs:
+      sdk_ref:
+        description: Git ref of blackdiamondlodge/bdh-sdk whose builder to use.
         required: false
+        type: string
+        default: v0
+      hub_api:
+        description: Hub API (bdh-app-runtime:hub-api-<N>) the app targets.
+        required: false
+        type: number
+        default: 2
+      smoke_env:
+        description: Extra environment for the smoke test, one KEY=VALUE per line.
+        required: false
+        type: string
+        default: ""
+      smoke_settle:
+        description: Seconds the smoke test lets background workers run before measuring memory.
+        required: false
+        type: number
+        default: 5
     outputs:
       released:
         description: "true when a new release was published"
         value: ${{ jobs.release.outputs.released }}
       tag:
         value: ${{ jobs.release.outputs.tag }}
-      requirement:
-        description: The apps.txt line (URL + hash) for the new wheel.
-        value: ${{ jobs.release.outputs.requirement }}
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -53,11 +73,16 @@ jobs:
     outputs:
       released: ${{ steps.publish.outputs.released || 'false' }}
       tag: ${{ steps.version.outputs.tag }}
-      requirement: ${{ steps.publish.outputs.requirement }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: blackdiamondlodge/bdh-sdk
+          ref: ${{ inputs.sdk_ref }}
+          path: .bdh-sdk
 
       - uses: actions/setup-python@v5
         with:
@@ -78,11 +103,39 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build
+      - name: Build the wheel
         if: steps.version.outputs.exists == 'false'
         run: |
           python -m pip install --upgrade pip build
-          python -m build
+          python -m build --outdir dist
+
+      - name: Lock, build and smoke-test the image
+        if: steps.version.outputs.exists == 'false'
+        env:
+          HUB_API: ${{ inputs.hub_api }}
+          SMOKE_ENV: ${{ inputs.smoke_env }}
+          SMOKE_SETTLE: ${{ inputs.smoke_settle }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$SMOKE_ENV" | sed '/^[[:space:]]*$/d' > "$RUNNER_TEMP/smoke.env"
+          SMOKE_ENV_FILE="$RUNNER_TEMP/smoke.env" bash .bdh-sdk/builder/app_artifacts.sh \
+            dist/*.whl pyproject.toml release
+          cp dist/*.tar.gz release/
+          {
+            echo "### Image smoke test"
+            echo '```json'
+            cat release/smoke.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest build provenance
+        if: steps.version.outputs.exists == 'false'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release/*.whl
+            release/*.tar.gz
+            release/bdh-*
 
       - name: Tag and create release
         id: publish
@@ -94,12 +147,6 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          wheel=$(ls dist/*.whl)
-          sdist=$(ls dist/*.tar.gz)
-          sha=$(sha256sum "$wheel" | cut -d' ' -f1)
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$wheel")"
-          requirement="${NAME} @ ${url} --hash=sha256:${sha}"
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "${NAME} ${VERSION}"
@@ -108,80 +155,22 @@ jobs:
           {
             echo "${NAME} ${VERSION}"
             echo
-            echo "Line for the hub's \`sites/<site>/apps.txt\`:"
+            git log -1 --format=%s
             echo
-            echo '```'
-            echo "$requirement"
+            echo "The platform builds ghcr.io/blackdiamondlodge/bdh-app-<id> from these assets"
+            echo "and adds it to the app catalog."
+            echo
+            echo "Smoke test of the image built from them:"
+            echo
+            echo '```json'
+            cat release/smoke.json
             echo '```'
           } > release-notes.md
 
-          gh release create "$TAG" "$wheel" "$sdist" \
+          assets=(release/*.whl release/*.tar.gz release/bdh-app.json release/bdh-lock.txt)
+          [ ! -f release/bdh-extra.Dockerfile ] || assets+=(release/bdh-extra.Dockerfile)
+          gh release create "$TAG" "${assets[@]}" \
             --title "${NAME} ${VERSION}" \
             --notes-file release-notes.md \
             --verify-tag
-
           echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "requirement=${requirement}" >> "$GITHUB_OUTPUT"
-      # The job can only mint an OIDC token when the caller grants
-      # id-token: write; requesting it here would fail every caller that
-      # doesn't, so detect it instead.
-      - name: Check attestation permissions
-        id: oidc
-        if: steps.publish.outputs.released == 'true'
-        run: |
-          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Wheel not attested: grant 'id-token: write' and 'attestations: write' to the app-release job."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Attest build provenance
-        id: attest
-        if: steps.oidc.outputs.available == 'true'
-        continue-on-error: true
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: dist/*.whl
-
-      - name: Add to the app catalog
-        if: steps.publish.outputs.released == 'true'
-        env:
-          CATALOG_TOKEN: ${{ secrets.CATALOG_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
-        run: |
-          set -euo pipefail
-          if [ -z "${CATALOG_TOKEN}" ]; then
-            echo "::warning::CATALOG_TOKEN not available; ${TAG} was not added to blackdiamondlodge/bdh-app-catalog. Pass it with 'secrets: inherit', or run scripts/sync_releases.py there."
-            exit 0
-          fi
-          changelog=$(git log -1 --format=%s)
-          wheel=$(ls "$PWD"/dist/*.whl)
-          git clone -q "https://x-access-token:${CATALOG_TOKEN}@github.com/blackdiamondlodge/bdh-app-catalog.git" "$RUNNER_TEMP/catalog"
-          cd "$RUNNER_TEMP/catalog"
-
-          args=(--wheel "$wheel" --repo "$GITHUB_REPOSITORY" --tag "$TAG"
-                --changelog "$changelog" --github-output "$RUNNER_TEMP/catalog.out")
-          if [ -n "${ATTESTATION_URL}" ]; then
-            args+=(--attestation-url "$ATTESTATION_URL")
-          fi
-          python scripts/add_version.py "${args[@]}"
-          app_id=$(sed -n 's/^app_id=//p' "$RUNNER_TEMP/catalog.out")
-          version=$(sed -n 's/^version=//p' "$RUNNER_TEMP/catalog.out")
-          branch="add/${app_id}-${version}"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -q -b "$branch"
-          git commit -q -am "Add ${app_id} ${version}"
-          git push -q --force origin "$branch"
-
-          export GH_TOKEN="$CATALOG_TOKEN"
-          repo=blackdiamondlodge/bdh-app-catalog
-          if ! gh pr view "$branch" --repo "$repo" --json number >/dev/null 2>&1; then
-            gh pr create --repo "$repo" --base main --head "$branch" \
-              --title "Add ${app_id} ${version}" \
-              --body "Released by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}: ${changelog}"
-          fi
-          gh pr merge "$branch" --repo "$repo" --squash --auto --delete-branch

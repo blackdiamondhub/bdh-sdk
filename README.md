@@ -494,9 +494,16 @@ installs the app wheel, then:
   tagged `selenium` in the runner's headless Chrome (with a go2rtc server
   on `localhost:1984` when `go2rtc: true`).
 
+- in a third job (input `image`, default true), builds the app's container
+  image the way the platform will and smoke-tests it like the supervisor
+  runs it (`builder/app_artifacts.sh`; see [builder/README.md](builder/README.md)).
+
 Inputs: `app_id` (required), `hub_ref` (default `main`), `python-version`
 (default `3.12`), `test_module` (default `app_id`), `sdk_ref` (default
-`v0`), `selenium` (default true), `go2rtc` (default false). Optional secret `hub_token` if the hub repo is private.
+`v0`), `selenium` (default true), `go2rtc` (default false), `image`
+(default true), `hub_api` (default 2), `smoke_env` (extra `KEY=VALUE` lines
+for the image smoke test), `smoke_settle` (default 5 seconds). Optional
+secret `hub_token` if the hub repo is private.
 
 `.github/workflows/app-release.yml` is the matching reusable release
 workflow. Call it on pushes to `main`:
@@ -509,20 +516,24 @@ jobs:
       contents: write
       id-token: write      # build provenance attestation
       attestations: write
-    secrets: inherit       # CATALOG_TOKEN
 ```
 
-The first time a `pyproject.toml` version lands on main it tags
-`v<version>`, builds the wheel and publishes a GitHub release. The release
-notes include the hashed line to paste into the hub's
-`sites/<site>/apps.txt`, which is also available as the `requirement`
-output. It then attests the wheel with `actions/attest-build-provenance` and
-opens an auto-merging PR adding the version to
-[bdh-app-catalog](https://github.com/blackdiamondlodge/bdh-app-catalog).
-Both are optional: without `id-token`/`attestations` the wheel isn't
-attested, and without the `CATALOG_TOKEN` secret (contents and pull requests
-write on bdh-app-catalog) the catalog PR is skipped. Each logs a warning.
+The first time a `pyproject.toml` version lands on main, the workflow tags
+`v<version>` and does the following:
 
+1. builds the wheel;
+2. locks the app's third-party dependencies against the current
+   `bdh-app-runtime` base (`bdh-lock.txt`);
+3. builds and smoke-tests the image;
+4. attests the assets;
+5. publishes a GitHub release with the wheel, sdist, `bdh-lock.txt` and
+   `bdh-app.json`.
+
+App repos build no images and need no secrets. The platform builder in
+[bdh-app-catalog](https://github.com/blackdiamondlodge/bdh-app-catalog)
+turns the release into `ghcr.io/blackdiamondlodge/bdh-app-<id>` and opens the
+catalog PR. Declare system packages, excluded dependencies and `custom_base`
+in `[tool.bdh]`; see [builder/README.md](builder/README.md).
 ## Development
 
 ```
