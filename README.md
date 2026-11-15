@@ -482,7 +482,10 @@ and the hub proxies to it inside an iframe.
 
 Manifest fields for the app store: `permissions`, `network`
 (`none`/`outbound`/`lan`), `lifecycle` (`always`/`on_demand`), `memory_mb`,
-`companions`.
+`companions`, `wake_every`. An `on_demand` app is stopped after 10 idle
+minutes; while it sleeps the hub shows its last status, card and stats and
+only wakes it when they are older than `wake_every` seconds (0 = the hub's
+default, 6 hours). Apps that must update sooner should use `always`.
 
 `bdh_sdk.testing.FakeBroker` is an in-process broker for app tests: register
 handlers with `.on(op, fn)` and check `.calls`.

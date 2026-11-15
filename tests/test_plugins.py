@@ -97,6 +97,11 @@ class ManifestTests(unittest.TestCase):
             (m["network"], m["lifecycle"], m["memory_mb"], m["permissions"], m["companions"]),
             ("outbound", "on_demand", 96, [], []),
         )
+        self.assertEqual(m["wake_every"], 0)
+
+    def test_wake_every(self):
+        m = PluginSpec(id="weather", app="weather", wake_every=4 * 3600).manifest()
+        self.assertEqual(m["wake_every"], 4 * 3600)
 
     def test_valid_permissions(self):
         perms = ("ha.read:sensor.*", "ha.read:*", "ha.read:light.kitchen",
@@ -119,6 +124,10 @@ class ManifestTests(unittest.TestCase):
             {"memory_mb": 8},
             {"memory_mb": "96"},
             {"companions": ("redis",)},
+            {"wake_every": 60},
+            {"wake_every": 30 * 24 * 3600},
+            {"wake_every": "3600"},
+            {"wake_every": True},
         ]
         for kwargs in bad:
             with self.subTest(**{k: str(v) for k, v in kwargs.items()}):
