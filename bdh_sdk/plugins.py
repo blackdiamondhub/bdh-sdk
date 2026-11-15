@@ -34,6 +34,11 @@ LIFECYCLE_ALWAYS = "always"
 LIFECYCLE_ON_DEMAND = "on_demand"
 LIFECYCLES = frozenset({LIFECYCLE_ALWAYS, LIFECYCLE_ON_DEMAND})
 
+# How stale (seconds) an on_demand app's tile status, stats etc. may get
+# before the hub wakes it to refresh them. 0 = the hub's default.
+MIN_WAKE_EVERY = 5 * 60
+MAX_WAKE_EVERY = 7 * 24 * 3600
+
 DEFAULT_MEMORY_MB = 96
 MIN_MEMORY_MB = 48
 MAX_MEMORY_MB = 256
@@ -418,6 +423,9 @@ class PluginSpec:
     ``network`` is one of :data:`NETWORKS`, ``lifecycle`` one of
     :data:`LIFECYCLES`, ``memory_mb`` the container memory limit and
     ``companions`` names platform helper containers (e.g. ``"go2rtc"``).
+    ``wake_every`` (seconds, 0 = hub default) is how old an ``on_demand``
+    app's cached status/stats may get before the hub wakes it to refresh
+    them; while it sleeps the hub shows the last answer.
     """
 
     id: str
@@ -442,6 +450,7 @@ class PluginSpec:
     lifecycle: str = LIFECYCLE_ON_DEMAND
     memory_mb: int = DEFAULT_MEMORY_MB
     companions: tuple[str, ...] = field(default_factory=tuple)
+    wake_every: int = 0
 
     def __post_init__(self):
         keys = [key for key, _label in self.stat_keys]
@@ -463,6 +472,11 @@ class PluginSpec:
         for name in self.companions:
             if name not in COMPANIONS:
                 raise ValueError(f"plugin {self.id!r} has unknown companion {name!r}")
+        if (not isinstance(self.wake_every, int) or isinstance(self.wake_every, bool)
+                or not (self.wake_every == 0 or MIN_WAKE_EVERY <= self.wake_every <= MAX_WAKE_EVERY)):
+            raise ValueError(
+                f"plugin {self.id!r} wake_every must be 0 or {MIN_WAKE_EVERY}..{MAX_WAKE_EVERY} seconds"
+            )
 
     def manifest(self) -> dict:
         """The container/runtime facts the store and supervisor need."""
@@ -474,6 +488,7 @@ class PluginSpec:
             "lifecycle": self.lifecycle,
             "memory_mb": self.memory_mb,
             "companions": list(self.companions),
+            "wake_every": self.wake_every,
             "provides": sorted(self.provides),
         }
 
