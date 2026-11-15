@@ -11,6 +11,7 @@ them before showing them.
 import inspect
 import logging
 import re
+import time
 from datetime import timezone
 from importlib import import_module
 
@@ -25,6 +26,29 @@ log = logging.getLogger(__name__)
 MIN_REFRESH = 2
 
 _SLUG = re.compile(r"[-a-zA-Z0-9_]+")
+
+LEFT = "{left}"
+
+
+def fmt_left(secs):
+    """``4:05`` / ``1:02:03``, rounded up so ``0:00`` only shows once over."""
+    secs = max(0, int(-(-secs // 1)))
+    h, rest = divmod(secs, 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def countdown(key, text, ends_at, now=None):
+    """JSON for a ``text`` that may count down to ``ends_at``.
+
+    Always has ``key`` with ``{left}`` filled in for now. With a countdown it
+    also has ``<key>_tpl`` and ``ends_at`` so the screen can tick it itself.
+    """
+    if ends_at is None or LEFT not in text:
+        return {key: text}
+    now = time.time() if now is None else now
+    return {key: text.replace(LEFT, fmt_left(ends_at - now)),
+            f"{key}_tpl": text, "ends_at": float(ends_at)}
 
 
 class HookNotFound(LookupError):
@@ -70,7 +94,8 @@ def status_value(result):
     if not isinstance(result, Status):
         raise TypeError(f"status hook returned {type(result).__name__}")
     level = result.level if result.level in STATUS_LEVELS else INFO
-    value = {"text": result.text, "level": level}
+    now = time.time()
+    value = {**countdown("text", result.text, result.ends_at, now), "level": level}
     rows = []
     for row in result.rows:
         if not isinstance(row, StatusRow):
@@ -81,7 +106,7 @@ def status_value(result):
         rows.append({
             "id": row.id,
             "title": row.title,
-            "detail": row.detail,
+            **countdown("detail", row.detail, row.ends_at, now),
             "image": _image_url(row.image),
             "dimmed": bool(row.dimmed),
             "actions": _actions_value(row.actions),
