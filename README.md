@@ -239,8 +239,8 @@ secrets.delete("refresh_token")
 
 - In a container (`bdh_sdk.rpc.install`) calls go to the broker as
   `secrets.get` / `secrets.set` / `secrets.delete`. The broker takes the app
-  from the token: an app can only reach its own secrets, and `app=` is not
-  sent. Grant the app `secrets.*`.
+  from the token: an app can only reach its own secrets (like its state, no
+  extra permission is needed), and `app=` is not sent.
 - In-process, the hub installs a database backend with
   `secrets.set_backend(backend)` (`get` raising `KeyError`, `set`, `delete`)
   and the app passes its id: `secrets.get("api_key", app="cameras")`.
