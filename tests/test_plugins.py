@@ -147,6 +147,11 @@ def _broken():
 
 
 class SettingTests(unittest.TestCase):
+    def test_as_list_unset_is_empty(self):
+        from bdh_sdk.plugins import as_list
+        self.assertEqual(as_list(None), [])
+        self.assertEqual(as_list("a, b,a"), ["a", "b"])
+
     def test_parse_by_type(self):
         self.assertIs(Setting("a", "A", type=BOOL).parse("on"), True)
         self.assertIs(Setting("a", "A", type=BOOL).parse(""), False)
