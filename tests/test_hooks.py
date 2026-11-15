@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 
 from bdh_sdk import hooks
 from bdh_sdk.plugins import CHOICE, Action, PluginSpec, Setting, Shortcut, Status, StatusRow, Stay
@@ -76,6 +77,19 @@ class RunTests(unittest.TestCase):
         self.assertEqual(front["image"], "")
         self.assertEqual([a["id"] for a in front["actions"]], ["close"])
         self.assertEqual((garage["image"], garage["dimmed"]), ("/cameras/snap.jpg", True))
+
+    def test_status_countdown(self):
+        with mock.patch("time.time", return_value=0):
+            out = hooks.status_value(Status("Egg {left}", ends_at=1000.0, rows=(
+                StatusRow("egg", "Egg", detail="{left} · ends 6:30 PM", ends_at=3700.5),
+                StatusRow("tea", "Tea", detail="Done", ends_at=50.0))))
+        self.assertEqual((out["text"], out["text_tpl"], out["ends_at"]), ("Egg 16:40", "Egg {left}", 1000.0))
+        egg, tea = out["rows"]
+        self.assertEqual((egg["detail"], egg["detail_tpl"], egg["ends_at"]),
+                         ("1:01:41 · ends 6:30 PM", "{left} · ends 6:30 PM", 3700.5))
+        self.assertEqual(tea["detail"], "Done")
+        self.assertNotIn("ends_at", tea)
+        self.assertEqual(hooks.fmt_left(-5), "0:00")
 
     def test_status_gets_mode_when_it_asks(self):
         out = hooks.run(spec(status=f"{HERE}.status_for"), "status", mode="guest")

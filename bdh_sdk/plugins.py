@@ -124,7 +124,9 @@ class StatusRow:
     """One live item on a tile, e.g. a speaker group that is playing.
 
     ``image`` is a URL the screen's browser can load. ``dimmed`` greys the
-    row out (paused, idle).
+    row out (paused, idle). With ``ends_at`` (epoch seconds) a ``{left}`` in
+    ``detail`` becomes the time left (``4:05``) and the screen counts it down
+    every second by itself.
     """
 
     id: str
@@ -133,6 +135,7 @@ class StatusRow:
     image: str = ""
     dimmed: bool = False
     actions: tuple[Action, ...] = ()
+    ends_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -143,7 +146,8 @@ class Status:
     own buttons; ``actions`` are tile-wide buttons, shown when the tile is
     too small for rows. ``refresh`` (seconds) asks the homepage to check
     again that often while this status is showing, for things that change
-    quickly; leave it None for the normal once a minute.
+    quickly; leave it None for the normal once a minute. ``ends_at`` counts
+    down a ``{left}`` in ``text``, as for :class:`StatusRow`.
     """
 
     text: str
@@ -151,6 +155,7 @@ class Status:
     rows: tuple[StatusRow, ...] = ()
     actions: tuple[Action, ...] = ()
     refresh: int | None = None
+    ends_at: float | None = None
 
 
 @dataclass(frozen=True)
