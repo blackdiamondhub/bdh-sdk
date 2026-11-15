@@ -234,7 +234,12 @@ def _call(path):
 
 
 def as_list(raw):
-    """Parse a ``multi`` value: a list, a JSON list or comma-separated text."""
+    """Parse a ``multi`` value: a list, a JSON list or comma-separated text.
+
+    ``None`` (an unset setting) is an empty list.
+    """
+    if raw is None:
+        return []
     if isinstance(raw, (list, tuple)):
         items = raw
     else:
