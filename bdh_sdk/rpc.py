@@ -1,7 +1,7 @@
 """Talks to the hub broker when an app runs in its own container.
 
 The hub starts each app container with ``BDH_BROKER_URL``, ``BDH_APP_ID`` and
-``BDH_APP_TOKEN``. :func:`install` then points the SDK's settings, state,
+``BDH_APP_TOKEN``. :func:`install` then points the SDK's settings, state, secrets,
 alerts, events, Home Assistant and speaker modules at the broker, so app code
 calls the same functions it always has.
 
@@ -49,7 +49,7 @@ APP_ENV = "BDH_APP_ID"
 _READ_OPS = frozenset({
     "settings.get", "state.get", "state.keys", "hub.brand",
     "ha.get_entity_state", "ha.get_entity_states", "ha.get_history",
-    "ha.get_all_states", "ha.get_static", "speakers.list",
+    "ha.get_all_states", "ha.get_static", "speakers.list", "secrets.get",
 })
 _RETRY_STATUS = frozenset({502, 503, 504})
 
@@ -244,6 +244,53 @@ class StateBackend:
         return list(self.client.call("state.keys", {"app": app_id}) or [])
 
 
+class SecretsBackend:
+    """``secrets.set_backend`` backend backed by the broker.
+
+    The broker takes the app from the token, so ``app_id`` is never sent.
+    Answers are cached in memory for ``ttl`` seconds; nothing touches disk.
+    """
+
+    app_from_token = True
+
+    def __init__(self, client, ttl=30.0):
+        self.client = client
+        self.ttl = ttl
+        self._cache = {}
+        self._lock = threading.Lock()
+
+    def get(self, app_id, name):
+        now = time.monotonic()
+        with self._lock:
+            hit = self._cache.get(name)
+        if hit and now - hit[0] < self.ttl:
+            value = hit[1]
+        else:
+            res = self.client.call("secrets.get", {"name": name}) or {}
+            value = res.get("value") if res.get("found") else None
+            with self._lock:
+                self._cache[name] = (now, value)
+        if value is None:
+            raise KeyError(name)
+        return value
+
+    def set(self, app_id, name, value):
+        with self._lock:
+            self._cache.pop(name, None)
+        self.client.call("secrets.set", {"name": name, "value": value})
+        with self._lock:
+            self._cache[name] = (time.monotonic(), value)
+
+    def delete(self, app_id, name):
+        with self._lock:
+            self._cache.pop(name, None)
+        self.client.call("secrets.delete", {"name": name})
+
+    def clear(self):
+        with self._lock:
+            self._cache.clear()
+
+
 class HABackend:
     """``ha.set_backend`` backend: Home Assistant calls go via the broker,
     which holds the token and checks the app's ``ha.*`` grants."""
@@ -361,7 +408,7 @@ def client():
 def install(rpc_client=None):
     """Point the SDK at the broker. Uses the environment unless a client is given."""
     global _client, _background, _unsubscribe
-    from . import alerts, events, ha, settings, speakers, storage
+    from . import alerts, events, ha, secrets, settings, speakers, storage
 
     if rpc_client is None:
         rpc_client = Client(os.environ[BROKER_ENV], os.environ.get(TOKEN_ENV, ""))
@@ -373,6 +420,7 @@ def install(rpc_client=None):
 
     settings.set_store(SettingsLookup(rpc_client))
     storage.set_state_backend(StateBackend(rpc_client))
+    secrets.set_backend(SecretsBackend(rpc_client))
     alerts.set_sender(lambda alert: bg.send("alerts.push", alert.as_dict()),
                       lambda app, key: bg.send("alerts.dismiss", {"app": app, "key": key}))
     ha.set_backend(HABackend(rpc_client))
@@ -387,7 +435,7 @@ def install(rpc_client=None):
 def uninstall():
     """Undo :func:`install`; the SDK goes back to its in-process defaults."""
     global _client, _background, _unsubscribe
-    from . import alerts, events, ha, settings, speakers, storage
+    from . import alerts, events, ha, secrets, settings, speakers, storage
 
     with _lock:
         was = _client is not None
@@ -400,6 +448,7 @@ def uninstall():
         return
     settings.set_store(None)
     storage.set_state_backend(None)
+    secrets.set_backend(None)
     alerts.set_sender(None)
     ha.set_backend(None)
     speakers.set_backend(None)

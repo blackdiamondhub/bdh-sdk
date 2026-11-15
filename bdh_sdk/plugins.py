@@ -214,7 +214,8 @@ STR = "str"
 CHOICE = "choice"
 TIME = "time"  # "HH:MM", 24-hour
 MULTI = "multi"  # a list of values picked from the choices (checkboxes)
-SETTING_TYPES = frozenset({BOOL, INT, STR, CHOICE, TIME, MULTI})
+SECRET = "secret"  # write-only; stored encrypted, read with bdh_sdk.secrets.get
+SETTING_TYPES = frozenset({BOOL, INT, STR, CHOICE, TIME, MULTI, SECRET})
 
 
 def _call(path):
@@ -247,7 +248,12 @@ class Setting:
     The saved value wins over the environment, so the environment (or
     ``default``) becomes the fallback. Read it with
     ``bdh_sdk.settings.app_setting(app_id, key, default)`` as usual.
-    Never declare secrets here: they belong in the environment only.
+
+    Passwords, API keys and tokens use ``type=SECRET``: the hub keeps them
+    encrypted in its secret store, shows only whether one is set (never the
+    value) and leaves them out of exports. Read one with
+    ``bdh_sdk.secrets.get(key)``, not ``app_setting``. A secret has no
+    ``default``.
 
     ``choices`` (for ``choice`` and ``multi``) is a tuple of values or
     ``(value, label)`` pairs. ``choices_from`` is instead the dotted path of a
@@ -276,6 +282,8 @@ class Setting:
             raise ValueError(f"setting {self.key!r} has unknown type {self.type!r}")
         if self.type in (CHOICE, MULTI) and not (self.choices or self.choices_from):
             raise ValueError(f"{self.type} setting {self.key!r} needs choices or choices_from")
+        if self.type == SECRET and self.default is not None:
+            raise ValueError(f"secret setting {self.key!r} can't have a default")
 
     @property
     def options(self) -> tuple:
@@ -320,6 +328,11 @@ class Setting:
                 if any(v not in known for v in values):
                     raise ValueError("Pick from the options.")
             return values
+        if self.type == SECRET:
+            value = str(raw)
+            if len(value) > 8192:
+                raise ValueError("Too long.")
+            return value
         text = str(raw).strip()
         if self.type == CHOICE:
             for value, _label in self.options:

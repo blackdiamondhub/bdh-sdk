@@ -157,7 +157,8 @@ spec = PluginSpec(
 
 Types are `BOOL`, `INT` (optional `minimum`/`maximum`), `STR`, `CHOICE`
 (`choices` of values or `(value, label)` pairs), `MULTI` (a list of values
-picked from `choices`, drawn as checkboxes) and `TIME` (`"HH:MM"`). For
+picked from `choices`, drawn as checkboxes), `TIME` (`"HH:MM"`) and `SECRET`
+(see [Secrets](#secrets)). For
 options only known at run time, pass `choices_from="myapp.module.func"`
 instead of `choices`: a zero-argument callable returning the same pairs,
 called whenever the Settings page is drawn. A `MULTI` setting with
@@ -167,7 +168,8 @@ or comma-separated text; read it with `app_setting(..., cast=as_list)`
 (`from bdh_sdk.plugins import as_list`).
 `Setting.parse(raw)` validates input and raises `ValueError` with a message
 for the form. Saved values win over the environment, so keep reading them
-with `app_setting`. Never declare secrets as settings.
+with `app_setting`. Passwords, API keys and tokens are `SECRET` settings,
+read with `bdh_sdk.secrets.get`, never `app_setting`.
 
 For anything a flat list can't hold (say, a list of calendar feeds), the
 app can draw its own pages and list them in `settings_pages`; the hub links
@@ -214,6 +216,46 @@ url = storage.url(name)
 ```
 
 App ids must be lower-case letters, digits and `_`.
+
+## Secrets
+
+Passwords, API keys and tokens live in the hub's secret store, encrypted
+(AES-256-GCM, key kept outside the database) and owned by one app. Declare
+the ones an admin enters as `SECRET` settings; the hub's Settings page then
+shows only "set" / "not set" with Replace and Clear, never the value, and
+leaves them out of exports, logs and the audit log (which records only app,
+name and operation).
+
+```python
+from bdh_sdk import Setting, secrets
+from bdh_sdk.plugins import SECRET
+
+settings=(Setting("protect_api_key_1", "Protect API key", type=SECRET),)
+
+api_key = secrets.get("protect_api_key_1")      # None when unset
+secrets.set("refresh_token", new_token)          # e.g. a rotated OAuth token
+secrets.delete("refresh_token")
+```
+
+- In a container (`bdh_sdk.rpc.install`) calls go to the broker as
+  `secrets.get` / `secrets.set` / `secrets.delete`. The broker takes the app
+  from the token: an app can only reach its own secrets (like its state, no
+  extra permission is needed), and `app=` is not sent.
+- In-process, the hub installs a database backend with
+  `secrets.set_backend(backend)` (`get` raising `KeyError`, `set`, `delete`)
+  and the app passes its id: `secrets.get("api_key", app="cameras")`.
+  Without a backend, secrets live in memory (what unit tests get).
+- `get(name, default=None, *, app=None, legacy=())` falls back to
+  `BDH_<APP>_<NAME>`, then any `legacy` env names, so a secret can leave
+  `.env` without the app changing again.
+- Values are text up to 8192 characters, held in memory only (container
+  reads are cached for 30 s); the SDK never writes or logs them.
+- An app can still leak a secret it has been given; the store only keeps
+  apps from reading each other's.
+
+`FakeBroker(app_id="cameras")` answers `secrets.*` from `.secrets`
+(`{(app, name): value}`), keyed by its own app the way the hub keys them by
+token.
 
 ## Units
 
@@ -424,8 +466,8 @@ serves the app named by `BDH_APP_ID` with uvicorn, a SQLite database in
 `BDH_DATA_DIR` and the SDK's own `base.html`. The hub's supervisor starts it
 and the hub proxies to it inside an iframe.
 
-- `BDH_BROKER_URL` / `BDH_APP_TOKEN` switch settings, state, alerts, events,
-  speakers and `ha` to RPC calls to the hub broker (`bdh_sdk.rpc`). Without
+- `BDH_BROKER_URL` / `BDH_APP_TOKEN` switch settings, state, secrets, alerts,
+  events, speakers and `ha` to RPC calls to the hub broker (`bdh_sdk.rpc`). Without
   them everything runs in-process as before.
 - `bdh_sdk.identity.IdentityMiddleware` only accepts requests the hub signed
   with the app token and sets `request.user` (`username`, `is_staff`) and

@@ -118,7 +118,9 @@ class FakeBroker:
 
     It records every call in :attr:`calls` (``(op, payload)``) and answers
     ``settings.*`` and ``state.*`` from :attr:`settings` / :attr:`state`
-    (``{(app, key): value}``). Anything else answers ``None`` unless a
+    (``{(app, key): value}``), and ``secrets.*`` from :attr:`secrets`
+    (``{(app, name): value}``) for the broker's own :attr:`app_id` only, the
+    way the hub ties secrets to the app's token. Anything else answers ``None`` unless a
     handler is registered with :meth:`on` (``fn(payload) -> result``; raise
     :class:`FakeBroker.Error` to fail the call). Ops outside :attr:`grants`
     (fnmatch patterns; default everything) get 403. Use as a context manager;
@@ -130,12 +132,14 @@ class FakeBroker:
             super().__init__(message or code)
             self.code, self.message, self.status = code, message or code, status
 
-    def __init__(self, token="test-token", *, grants=("*",), install=False):
+    def __init__(self, token="test-token", *, grants=("*",), install=False, app_id="test"):
         self.token = token
+        self.app_id = app_id
         self.grants = list(grants)
         self.calls = []
         self.settings = {}
         self.state = {}
+        self.secrets = {}
         self.handlers = {}
         self._install = install
         self._server = None
@@ -222,6 +226,8 @@ class FakeBroker:
         return 200, {"ok": True, "result": result}
 
     def _default(self, op, p):
+        if op.startswith("secrets."):
+            return self._secret(op, p)
         key = (p.get("app"), p.get("key"))
         if op == "settings.get":
             return {"found": key in self.settings, "value": self.settings.get(key)}
@@ -233,4 +239,20 @@ class FakeBroker:
             self.state.pop(key, None)
         elif op == "state.keys":
             return sorted(k for a, k in self.state if a == p.get("app"))
+        return None
+
+    def _secret(self, op, p):
+        name = p.get("name")
+        if not isinstance(name, str) or not name:
+            raise FakeBroker.Error("invalid", "name is required")
+        key = (self.app_id, name)
+        if op == "secrets.get":
+            return {"found": key in self.secrets, "value": self.secrets.get(key)}
+        if op == "secrets.set":
+            value = p.get("value")
+            if not isinstance(value, str) or not value:
+                raise FakeBroker.Error("invalid", "value must be a non-empty string")
+            self.secrets[key] = value
+        elif op == "secrets.delete":
+            self.secrets.pop(key, None)
         return None
