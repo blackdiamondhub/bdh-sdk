@@ -90,5 +90,61 @@ class QrSvgTests(unittest.TestCase):
         self.assertLess(float(_logo(root).get("width")) / n, 0.2)
 
 
+def _raster(svg, scale=8):
+    """Rasterize a qr_svg code, painting the logo solid dark: the worst case
+    a decoder can see in the hole."""
+    from PIL import Image, ImageDraw
+
+    root = ET.fromstring(svg)
+    n = float(root.get("viewBox").split()[2])
+    img = Image.new("L", (int(n * scale),) * 2, 255)
+    draw = ImageDraw.Draw(img)
+    for el in root.iter():
+        if el.tag == f"{SVG}circle":
+            cx, cy, r = (float(el.get(k)) * scale for k in ("cx", "cy", "r"))
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=0)
+        elif el.tag == f"{SVG}rect" and el.get("x") is not None:
+            x, y, w, h = (float(el.get(k)) * scale for k in ("x", "y", "width", "height"))
+            if el.get("fill") == "none":
+                sw = float(el.get("stroke-width")) * scale
+                draw.rectangle([x - sw / 2, y - sw / 2, x + w + sw / 2, y + h + sw / 2], outline=0, width=int(sw))
+            else:
+                draw.rectangle([x, y, x + w, y + h], fill=0)
+        elif el is not root and el.get("class") == "qr-logo":
+            x, y, w = (float(el.get(k)) * scale for k in ("x", "y", "width"))
+            draw.rectangle([x, y, x + w, y + w], fill=0)
+    return img
+
+
+@unittest.skipUnless(find_spec("qrcode") and find_spec("zxingcpp") and find_spec("PIL"), "needs the qr-test extra")
+class QrDecodeTests(unittest.TestCase):
+    """A fixed share of the width as the logo hole overloaded one RS block on
+    small symbols (v3-H: 2 blocks of 11 correctable codewords), so ~1% of wifi
+    codes didn't decode, depending on payload and mask."""
+
+    def _decode(self, text):
+        import zxingcpp
+
+        from bdh_sdk.qr import qr_svg
+
+        found = zxingcpp.read_barcodes(_raster(qr_svg(text)), formats=zxingcpp.BarcodeFormat.QRCode)
+        return [r.text for r in found]
+
+    def test_known_bad_payload(self):
+        self.assertEqual(self._decode("WIFI:S:Other;T:nopass;;"), ["WIFI:S:Other;T:nopass;;"])
+
+    def test_random_wifi_payloads_decode(self):
+        import random
+        import string
+
+        rng = random.Random(1)
+        alphabet = string.ascii_letters + string.digits + " -_."
+        for _ in range(1500):
+            ssid = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 32)))
+            pw = "".join(rng.choice(alphabet) for _ in range(rng.choice([0, rng.randint(8, 63)])))
+            text = f"WIFI:S:{ssid};T:WPA;P:{pw};;" if pw else f"WIFI:S:{ssid};T:nopass;;"
+            self.assertEqual(self._decode(text), [text])
+
+
 if __name__ == "__main__":
     unittest.main()

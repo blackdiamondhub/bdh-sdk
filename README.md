@@ -306,7 +306,9 @@ with the SDK.
 dots, square finder patterns and the site's monogram in the centre (error
 correction H keeps it scannable). Text over 200 characters drops to error
 correction L with a smaller monogram so the code isn't too dense to scan.
-Pass `logo=<svg text>` to use a different centre image. Install the
+The logo hole is sized from the actual codeword layout so it never uses more
+than 40% of any error-correction block (small codes get a smaller logo, or
+none). Pass `logo=<svg text>` to use a different centre image. Install the
 `bdh-sdk[qr]` extra; the hub already ships `qrcode`.
 
 ```python
