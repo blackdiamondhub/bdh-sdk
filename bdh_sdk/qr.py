@@ -6,11 +6,71 @@ QR_BORDER = 4  # quiet zone, in modules (the QR spec minimum)
 LOGO_FRACTION = 0.26  # logo width as a share of the code width; safe with ECC level H
 LONG_TEXT = 200  # longer text drops to ECC L with a smaller logo, so the code isn't too dense to scan
 LONG_LOGO_FRACTION = 0.14
+ECC_BUDGET = 0.4  # share of each block's correctable codewords the logo may use; the rest is for real-world noise
 
 
 def _inner(svg):
     """Contents of an SVG document (everything inside the root <svg>)."""
     return svg[svg.index(">") + 1:svg.rindex("</svg>")]
+
+
+def _codewords(qr):
+    """For a made QRCode: {(row, col): codeword index} for every data module
+    (border excluded) and the RS block owning each codeword. Mirrors the
+    spec's placement: zigzag up/down column pairs from the bottom right,
+    skipping column 6 and function patterns; codewords are interleaved data
+    first, then error correction, one per block in turn."""
+    from copy import copy
+
+    from qrcode.base import rs_blocks
+
+    blank = copy(qr)
+    blank.map_data = lambda data, mask: None  # function patterns only
+    blank.makeImpl(False, 0)
+    n, grid = blank.modules_count, blank.modules
+
+    blocks = rs_blocks(qr.version, qr.error_correction)
+    owner = []
+    for i in range(max(b.data_count for b in blocks)):
+        owner += [k for k, b in enumerate(blocks) if i < b.data_count]
+    for i in range(max(b.total_count - b.data_count for b in blocks)):
+        owner += [k for k, b in enumerate(blocks) if i < b.total_count - b.data_count]
+
+    where, bit, up, col = {}, 0, True, n - 1
+    while col > 0:
+        if col == 6:
+            col -= 1
+        for r in range(n - 1, -1, -1) if up else range(n):
+            for c in (col, col - 1):
+                if grid[r][c] is None:
+                    if bit // 8 < len(owner):  # trailing remainder bits carry nothing
+                        where[r, c] = bit // 8
+                    bit += 1
+        up, col = not up, col - 2
+    return where, owner, blocks
+
+
+def _hole_fits(n, hole, where, owner, blocks):
+    """Whether hiding a centred hole (plus its one-module margin) on an n-module
+    symbol damages no more than ECC_BUDGET of the codewords each block can correct."""
+    h0 = (n - hole) // 2
+    damaged = {where[r, c] for r in range(h0 - 1, h0 + hole + 1) for c in range(h0 - 1, h0 + hole + 1)
+               if (r, c) in where}
+    per_block = [0] * len(blocks)
+    for cw in damaged:
+        per_block[owner[cw]] += 1
+    return all(hit <= (b.total_count - b.data_count) // 2 * ECC_BUDGET for hit, b in zip(per_block, blocks))
+
+
+def logo_hole(qr, fraction):
+    """Largest odd hole (in modules) up to ``fraction`` of the symbol width that
+    error correction can always recover, whatever the payload and mask."""
+    n = qr.modules_count
+    where, owner, blocks = _codewords(qr)
+    hole = round(n * fraction) | 1
+    while hole > 1 and not _hole_fits(n, hole, where, owner, blocks):
+        hole -= 2
+    return hole
 
 
 def qr_svg(text, logo=None):
@@ -29,8 +89,9 @@ def qr_svg(text, logo=None):
     n = len(matrix)
     finders = [(QR_BORDER, QR_BORDER), (QR_BORDER, n - QR_BORDER - 7), (n - QR_BORDER - 7, QR_BORDER)]
 
-    fraction = LONG_LOGO_FRACTION if long else LOGO_FRACTION
-    hole = round((n - 2 * QR_BORDER) * fraction) | 1  # odd, so it centres on a module
+    # Odd, so it centres on a module; sized from the real codeword layout:
+    # a fixed share of the width overloads one RS block on small symbols.
+    hole = logo_hole(qr, LONG_LOGO_FRACTION if long else LOGO_FRACTION)
     h0 = (n - hole) // 2
     h1 = h0 + hole
 
