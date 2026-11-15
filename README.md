@@ -477,7 +477,8 @@ and the hub proxies to it inside an iframe.
 - The hub reads tiles, status and shortcuts through `POST /_bdh/hook` and
   relays events through `POST /_bdh/events`; `GET /_bdh/health` is unsigned.
 - `bdh/embed.js` talks to the hub shell with `postMessage` (title, resize,
-  activity, navigate, toast, open-overlay).
+  activity, navigate, toast, theme, open-overlay). `theme` sends the page's
+  background colour so the hub paints it behind the frame (no white flash).
 
 Manifest fields for the app store: `permissions`, `network`
 (`none`/`outbound`/`lan`), `lifecycle` (`always`/`on_demand`), `memory_mb`,
