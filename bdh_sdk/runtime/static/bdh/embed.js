@@ -9,6 +9,7 @@
  *   activity      {}                    the visitor touched the screen (screensaver)
  *   navigate      {name, args} | {path} open a hub page (URL name or same-origin path)
  *   toast         {message, level}      a short notice drawn by the hub
+ *   theme         {background}          the page background colour (hex/rgb/rgba)
  *   open-overlay  {kind, ...}           ask the hub to open one of its overlays
  *
  * window.bdh: send(type, data), navigate(target), toast(message, level),
@@ -102,10 +103,20 @@
         }
     });
 
+    // The page background, so the hub paints the same colour behind the frame
+    // (no white flash on the next open or during fullscreen transitions).
+    function transparent(c) { return !c || c === 'transparent' || /^rgba\(.*,\s*0\s*\)$/.test(c); }
+    function sendTheme() {
+        var c = document.body ? getComputedStyle(document.body).backgroundColor : '';
+        if (transparent(c)) c = getComputedStyle(document.documentElement).backgroundColor;
+        if (!transparent(c)) send('theme', {background: c});
+    }
+
     function ready() {
         var t = document.getElementById('bdh-title');
         var title = t ? (t.content ? t.content.textContent : t.textContent).trim() : '';
         send('title', {title: title || document.title});
+        sendTheme();
         if (window.ResizeObserver) new ResizeObserver(schedule).observe(document.documentElement);
         window.addEventListener('load', schedule);
         schedule();
