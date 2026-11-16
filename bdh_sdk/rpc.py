@@ -178,6 +178,108 @@ class _Background:
                 self.queue.task_done()
 
 
+class _Desired:
+    """Keeps the hub holding what the app wants it to (its event subscriptions).
+
+    Only the latest value per key is sent, after ``delay`` so start-up bursts
+    go out as one call. A failure is retried with backoff until the hub takes
+    the value, unless the hub refused it (forbidden or invalid), which retrying
+    can't fix. Runs on its own thread so alerts and events never queue behind
+    a retry.
+    """
+
+    def __init__(self, client, *, delay=0.5, backoff=1.0, max_backoff=30.0):
+        self.client = client
+        self.delay = delay
+        self.backoff = backoff
+        self.max_backoff = max_backoff
+        self.pending = {}  # key -> (op, payload, version)
+        self.version = 0
+        self.busy = False
+        self.stopped = False
+        self.cond = threading.Condition()
+        self.thread = None
+
+    def set(self, key, op, payload):
+        with self.cond:
+            if self.stopped:
+                return
+            self.version += 1
+            self.pending[key] = (op, payload, self.version)
+            if self.thread is None or not self.thread.is_alive():
+                self.thread = threading.Thread(target=self._run, name="bdh-rpc-desired", daemon=True)
+                self.thread.start()
+            self.cond.notify_all()
+
+    def stop(self):
+        with self.cond:
+            self.stopped = True
+            self.pending.clear()
+            self.cond.notify_all()
+
+    def join(self, timeout=5.0):
+        """Wait until the hub has taken every pending value. Meant for tests."""
+        deadline = time.monotonic() + timeout
+        with self.cond:
+            while self.pending or self.busy:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return False
+                self.cond.wait(left)
+        return True
+
+    def _run(self):
+        wait = self.backoff
+        while True:
+            with self.cond:
+                while not self.pending and not self.stopped:
+                    self.cond.wait()
+                if self.stopped:
+                    return
+                self.busy = True
+            time.sleep(self.delay)
+            with self.cond:
+                if self.stopped:
+                    self.busy = False
+                    self.cond.notify_all()
+                    return
+                batch = list(self.pending.items())
+            failed = False
+            for key, (op, payload, version) in batch:
+                if not self._send(op, payload):
+                    failed = True
+                    continue
+                with self.cond:
+                    if key in self.pending and self.pending[key][2] == version:
+                        del self.pending[key]
+            with self.cond:
+                self.busy = False
+                self.cond.notify_all()
+                if not failed:
+                    wait = self.backoff
+                    continue
+                # Wake early if a newer value comes in; it's retried with the rest.
+                self.cond.wait(wait)
+            wait = min(wait * 2, self.max_backoff)
+
+    def _send(self, op, payload):
+        """True once the hub has taken (or for good refused) ``payload``."""
+        try:
+            self.client.call(op, payload)
+            return True
+        except PermissionDenied as exc:
+            log.error("broker refused %s: %s", op, exc)
+            return True
+        except BrokerError as exc:
+            if exc.code == "invalid":
+                log.error("broker refused %s: %s", op, exc)
+                return True
+            log.warning("broker %s failed (will retry): %s", op, exc)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("broker %s failed (will retry): %s", op, exc)
+        return False
+
+
 class SettingsLookup:
     """``settings.set_store`` lookup; caches answers for ``ttl`` seconds."""
 
@@ -405,6 +507,7 @@ class SpeakersBackend:
 
 _client = None
 _background = None
+_desired = None
 _unsubscribe = None
 _lock = threading.Lock()
 
@@ -427,7 +530,7 @@ def client():
 
 def install(rpc_client=None):
     """Point the SDK at the broker. Uses the environment unless a client is given."""
-    global _client, _background, _unsubscribe
+    global _client, _background, _desired, _unsubscribe
     from . import alerts, events, ha, secrets, settings, speakers, storage
 
     if rpc_client is None:
@@ -436,7 +539,8 @@ def install(rpc_client=None):
     with _lock:
         _client = rpc_client
         _background = _Background(rpc_client)
-        bg = _background
+        _desired = _Desired(rpc_client)
+        bg, desired = _background, _desired
 
     settings.set_store(SettingsLookup(rpc_client))
     storage.set_state_backend(StateBackend(rpc_client))
@@ -448,13 +552,13 @@ def install(rpc_client=None):
     events.set_forwarder(lambda ev: bg.send("events.publish", {
         "topic": ev.topic, "data": ev.data, "time": ev.time}))
     _unsubscribe = events.add_listener(
-        lambda patterns: bg.send("events.subscribe", {"patterns": patterns}))
+        lambda patterns: desired.set("events", "events.subscribe", {"patterns": patterns}))
     return rpc_client
 
 
 def uninstall():
     """Undo :func:`install`; the SDK goes back to its in-process defaults."""
-    global _client, _background, _unsubscribe
+    global _client, _background, _desired, _unsubscribe
     from . import alerts, events, ha, secrets, settings, speakers, storage
 
     with _lock:
@@ -462,8 +566,11 @@ def uninstall():
         unsub, _unsubscribe = _unsubscribe, None
         _client = None
         _background = None
+        desired, _desired = _desired, None
     if unsub:
         unsub()
+    if desired:
+        desired.stop()
     if not was:
         return
     settings.set_store(None)
@@ -476,6 +583,8 @@ def uninstall():
 
 
 def flush(timeout=5.0):
-    """Wait until queued alerts and events have been sent. Meant for tests."""
-    bg = _background
-    return True if bg is None else bg.join(timeout)
+    """Wait until queued alerts, events and subscriptions have been sent. Meant for tests."""
+    bg, desired = _background, _desired
+    deadline = time.monotonic() + timeout
+    ok = bg is None or bg.join(timeout)
+    return ok and (desired is None or desired.join(max(0.0, deadline - time.monotonic())))
