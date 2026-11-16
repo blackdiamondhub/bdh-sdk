@@ -148,6 +148,9 @@ class Status:
     again that often while this status is showing, for things that change
     quickly; leave it None for the normal once a minute. ``ends_at`` counts
     down a ``{left}`` in ``text``, as for :class:`StatusRow`.
+
+    With ``readings`` (and no ``rows``) the tile shows the first one big and
+    the rest as small stats, e.g. the temperature up the mountain.
     """
 
     text: str
@@ -156,6 +159,7 @@ class Status:
     actions: tuple[Action, ...] = ()
     refresh: int | None = None
     ends_at: float | None = None
+    readings: tuple["Reading", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -190,7 +194,7 @@ class Stay:
 
 @dataclass(frozen=True)
 class Reading:
-    """A labelled value on the lodge card, e.g. ``Reading("Hot tub", 39, "C")``.
+    """A labelled value on the lodge card or a tile, e.g. ``Reading("Hot tub", 39, "C")``.
 
     Temperatures use unit ``"C"`` so the hub can show them in the visitor's
     chosen units.

@@ -86,6 +86,15 @@ def _actions_value(actions):
     return items
 
 
+def readings_value(readings, what):
+    items = []
+    for r in readings:
+        if not isinstance(r, Reading):
+            raise TypeError(f"{what} reading is {type(r).__name__}")
+        items.append({"label": r.label, "value": r.value, "unit": r.unit})
+    return items
+
+
 def status_value(result):
     if result is None:
         return None
@@ -112,10 +121,13 @@ def status_value(result):
             "actions": _actions_value(row.actions),
         })
     actions = _actions_value(result.actions)
+    readings = readings_value(result.readings, "status")
     if rows:
         value["rows"] = rows
     if actions:
         value["actions"] = actions
+    if readings:
+        value["readings"] = readings
     if result.refresh:
         value["refresh"] = max(MIN_REFRESH, int(result.refresh))
     return value
@@ -155,15 +167,10 @@ def card_value(result):
             url = reverse(result.url_name)
         except NoReverseMatch:
             log.warning("Card links to unknown URL name %r", result.url_name)
-    readings = []
-    for r in result.readings:
-        if not isinstance(r, Reading):
-            raise TypeError(f"card reading is {type(r).__name__}")
-        readings.append({"label": r.label, "value": r.value, "unit": r.unit})
     return {
         "title": result.title,
         "detail": result.detail,
-        "readings": readings,
+        "readings": readings_value(result.readings, "card"),
         "alerts": [str(a) for a in result.alerts],
         "url": url,
         "level": result.level if result.level in STATUS_LEVELS else INFO,

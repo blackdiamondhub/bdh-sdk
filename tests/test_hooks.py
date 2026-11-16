@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 from bdh_sdk import hooks
-from bdh_sdk.plugins import CHOICE, Action, PluginSpec, Setting, Shortcut, Status, StatusRow, Stay
+from bdh_sdk.plugins import CHOICE, Action, PluginSpec, Reading, Setting, Shortcut, Status, StatusRow, Stay
 from bdh_sdk.provides import BACKGROUNDS, SEASON, STATS, Background, SeasonHint, Stat
 
 HERE = __name__
@@ -90,6 +90,16 @@ class RunTests(unittest.TestCase):
         self.assertEqual(tea["detail"], "Done")
         self.assertNotIn("ends_at", tea)
         self.assertEqual(hooks.fmt_left(-5), "0:00")
+
+    def test_status_readings(self):
+        out = hooks.status_value(Status("−8°C up top", readings=(
+            Reading("Up top", -8, "C"), Reading("Lodge", -2.5, "C"))))
+        self.assertEqual(out["readings"], [
+            {"label": "Up top", "value": -8, "unit": "C"},
+            {"label": "Lodge", "value": -2.5, "unit": "C"}])
+        self.assertNotIn("readings", hooks.status_value(Status("plain")))
+        with self.assertRaises(TypeError):
+            hooks.status_value(Status("bad", readings=("−8",)))
 
     def test_status_gets_mode_when_it_asks(self):
         out = hooks.run(spec(status=f"{HERE}.status_for"), "status", mode="guest")
