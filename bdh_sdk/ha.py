@@ -31,6 +31,7 @@ __all__ = [
     "get_entity_state",
     "get_entity_states",
     "get_history",
+    "get_registry",
     "get_static",
     "get_tts",
     "instances",
@@ -355,3 +356,41 @@ def ws_commands(*messages, instance=None):
         raise HAError(f"websocket command failed: {exc}") from exc
     finally:
         ws.close()
+
+
+_ENTITY_FIELDS = ("entity_id", "device_id", "platform", "translation_key", "disabled_by",
+                  "name", "original_name")
+_DEVICE_FIELDS = ("id", "name", "name_by_user", "manufacturer", "model")
+
+
+def get_registry(platform=None, instance=None):
+    """The entity and device registries, trimmed to what apps need.
+
+    Returns ``{"entities": [...], "devices": [...], "unit_system": {...}}``.
+    Entities carry ``entity_id``, ``device_id``, ``platform``,
+    ``translation_key``, ``disabled_by``, ``name`` and ``original_name``;
+    ``platform`` keeps only that integration's entities. Devices are the ones
+    those entities belong to, with ``id``, ``name``, ``name_by_user``,
+    ``manufacturer`` and ``model``. ``unit_system`` comes from HA's config.
+
+    In a container the broker answers this (op ``ha.registry``) and returns
+    only the entities the app's ``ha.read`` grants cover. Raises HAError on
+    failure.
+    """
+    if _backend is not None:
+        return _backend.get_registry(platform=platform, **_kw(instance))
+    entities, devices, config = ws_commands(
+        {"type": "config/entity_registry/list"},
+        {"type": "config/device_registry/list"},
+        {"type": "get_config"},
+        instance=instance,
+    )
+    ents = [
+        {k: e.get(k) for k in _ENTITY_FIELDS}
+        for e in entities or ()
+        if e.get("entity_id") and (platform is None or e.get("platform") == platform)
+    ]
+    device_ids = {e["device_id"] for e in ents if e["device_id"]}
+    devs = [{k: d.get(k) for k in _DEVICE_FIELDS} for d in devices or () if d.get("id") in device_ids]
+    return {"entities": ents, "devices": devs,
+            "unit_system": dict((config or {}).get("unit_system") or {})}

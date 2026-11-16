@@ -49,7 +49,7 @@ APP_ENV = "BDH_APP_ID"
 _READ_OPS = frozenset({
     "settings.get", "state.get", "state.keys", "hub.brand",
     "ha.get_entity_state", "ha.get_entity_states", "ha.get_history",
-    "ha.get_all_states", "ha.get_static", "ha.instances", "speakers.list", "secrets.get",
+    "ha.get_all_states", "ha.get_static", "ha.instances", "ha.registry", "speakers.list", "secrets.get",
 })
 _RETRY_STATUS = frozenset({502, 503, 504})
 
@@ -465,6 +465,10 @@ class HABackend:
     def ws_commands(self, *messages, instance=None):
         return self._call("ws_commands", self._with({"messages": list(messages)}, instance),
                           timeout=30)
+
+    def get_registry(self, platform=None, instance=None):
+        payload = {} if platform is None else {"platform": platform}
+        return self._call("registry", self._with(payload, instance), timeout=30)
 
 
 class SpeakersBackend:

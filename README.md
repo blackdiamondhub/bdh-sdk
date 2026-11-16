@@ -423,10 +423,19 @@ for inst in ha.instances():                          # [{"id": "mi", ...}, ...]
     states = ha.get_all_states(instance=inst["id"])
 ```
 
+`get_registry(platform=None)` returns the entity and device registries trimmed
+to what apps need: `{"entities": [...], "devices": [...], "unit_system": {...}}`.
+Entities have `entity_id`, `device_id`, `platform`, `translation_key`,
+`disabled_by`, `name` and `original_name`; `platform="napoleon"` keeps just that
+integration's. Devices are only those the entities belong to (`id`, `name`,
+`name_by_user`, `manufacturer`, `model`). In a container the broker answers it
+(op `ha.registry`, needs any `ha.read` grant) with only the entities the app may
+read, so apps don't need the admin-only `ha.ws` grant that `ws_commands` does.
+
 Read helpers (`get_entity_state`, `get_entity_states`, `get_history`) return
 `None`/`{}` when HA is unreachable, so pages can still render.
-`get_all_states`, `get_static`, `upload_media` and `ws_commands` raise
-`ha.HAError` instead.
+`get_all_states`, `get_registry`, `get_static`, `upload_media` and `ws_commands`
+raise `ha.HAError` instead.
 
 ## Speakers
 
@@ -497,7 +506,8 @@ only wakes it when they are older than `wake_every` seconds (0 = the hub's
 default, 6 hours). Apps that must update sooner should use `always`.
 
 `bdh_sdk.testing.FakeBroker` is an in-process broker for app tests: register
-handlers with `.on(op, fn)` and check `.calls`.
+handlers with `.on(op, fn)` and check `.calls`. It answers `ha.registry` from
+`.registry`.
 
 `python -m bdh_sdk.runtime.manage <command>` runs Django management commands
 in the container (without starting the app's server or background workers).
