@@ -43,7 +43,7 @@ from .plugins import (
 from .auth import is_admin
 from .provides import BACKGROUNDS, SEASON, STATS, Background, SeasonHint, Stat
 
-__version__ = "0.33.2"
+__version__ = "0.34.0"
 
 __all__ = [
     "__version__",

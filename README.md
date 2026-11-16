@@ -54,6 +54,8 @@ size; tile-wide `actions` are used when it is too small for rows. Taps call
 `run_action(row_id, action_id)` (`row_id` is `""` for tile-wide actions).
 Set `Status.refresh` (seconds) for things that change quickly: the
 homepage checks that often while the status is showing.
+With `Status.readings` (`Reading`s, no rows) the tile shows the first one
+big and the rest as small stats; unit `"C"` follows the hub's °C/°F toggle.
 
 A `stay` hook returns the `Stay` in progress (guest name, arrival, checkout)
 or None. While an app reports a stay the homepage is in guest mode and
