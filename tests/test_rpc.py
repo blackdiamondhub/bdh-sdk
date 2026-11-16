@@ -149,6 +149,21 @@ class InstalledTests(unittest.TestCase):
         self.broker.on("ha.instances", missing)
         self.assertEqual([i["id"] for i in ha.instances()], ["ha"])
 
+    def test_ha_registry_goes_to_the_broker(self):
+        self.broker.registry = {
+            "entities": [{"entity_id": "climate.fp", "device_id": "d1", "platform": "napoleon"},
+                         {"entity_id": "light.k", "device_id": "d2", "platform": "hue"}],
+            "devices": [{"id": "d1", "name": "FP"}, {"id": "d2", "name": "Bulb"}],
+            "unit_system": {"temperature": "°C"},
+        }
+        reg = ha.get_registry(platform="napoleon", instance="bdl")
+        self.assertEqual(self.broker.ops("ha.registry")[-1], {"platform": "napoleon", "instance": "bdl"})
+        self.assertEqual([e["entity_id"] for e in reg["entities"]], ["climate.fp"])
+        self.assertEqual(reg["devices"], [{"id": "d1", "name": "FP"}])
+        self.assertEqual(reg["unit_system"], {"temperature": "°C"})
+        self.assertEqual(len(ha.get_registry()["entities"]), 2)
+        self.assertEqual(self.broker.ops("ha.registry")[-1], {})
+
     def test_ha_errors_map_to_ha_error(self):
         def fail(payload):
             raise FakeBroker.Error("ha_error", "HA said no", 500)

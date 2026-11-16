@@ -120,7 +120,8 @@ class FakeBroker:
     ``settings.*`` and ``state.*`` from :attr:`settings` / :attr:`state`
     (``{(app, key): value}``), and ``secrets.*`` from :attr:`secrets`
     (``{(app, name): value}``) for the broker's own :attr:`app_id` only, the
-    way the hub ties secrets to the app's token. Anything else answers ``None`` unless a
+    way the hub ties secrets to the app's token, and ``ha.registry`` from
+    :attr:`registry` (narrowed by the payload's ``platform``). Anything else answers ``None`` unless a
     handler is registered with :meth:`on` (``fn(payload) -> result``; raise
     :class:`FakeBroker.Error` to fail the call). Ops outside :attr:`grants`
     (fnmatch patterns; default everything) get 403. Use as a context manager;
@@ -140,6 +141,7 @@ class FakeBroker:
         self.settings = {}
         self.state = {}
         self.secrets = {}
+        self.registry = {"entities": [], "devices": [], "unit_system": {}}
         self.handlers = {}
         self._install = install
         self._server = None
@@ -241,7 +243,17 @@ class FakeBroker:
             return sorted(k for a, k in self.state if a == p.get("app"))
         elif op == "ha.instances":
             return [{"id": "ha", "name": "Home Assistant", "site": "", "default": True}]
+        elif op == "ha.registry":
+            return self._registry(p.get("platform"))
         return None
+
+    def _registry(self, platform):
+        ents = [e for e in self.registry.get("entities", ())
+                if platform is None or e.get("platform") == platform]
+        ids = {e.get("device_id") for e in ents}
+        return {"entities": ents,
+                "devices": [d for d in self.registry.get("devices", ()) if d.get("id") in ids],
+                "unit_system": self.registry.get("unit_system", {})}
 
     def _secret(self, op, p):
         name = p.get("name")
