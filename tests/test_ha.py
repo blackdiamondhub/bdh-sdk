@@ -75,6 +75,47 @@ class HAClientTests(unittest.TestCase):
         with self.assertRaises(ha.HAError):
             ha.upload_media("x", "a.wav", b"", "audio/wav")
 
+class _Provider:
+    def instances(self):
+        return [{"id": "mi", "name": "Home", "site": "MI", "default": True},
+                {"id": "bdl", "name": "Lodge", "site": "BDL", "default": False}]
+
+    def connection(self, instance):
+        conns = {None: ("http://mi:8123", "t-mi"), "mi": ("http://mi:8123", "t-mi"),
+                 "bdl": ("http://bdl:8123", "t-bdl")}
+        if instance not in conns:
+            raise ha.HAError(f"unknown instance {instance}")
+        return conns[instance]
+
+
+class HAInstanceTests(unittest.TestCase):
+    def setUp(self):
+        ha.set_provider(_Provider())
+        self.addCleanup(ha.set_provider, None)
+
+    @mock.patch("bdh_sdk.ha.requests.get")
+    def test_instance_selects_connection(self, get):
+        get.return_value = _resp(body={"entity_id": "light.a", "state": "on"})
+        ha.get_entity_state("light.a", instance="bdl")
+        self.assertEqual(get.call_args.args[0], "http://bdl:8123/api/states/light.a")
+        self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer t-bdl")
+        ha.get_entity_state("light.a")
+        self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer t-mi")
+
+    @mock.patch("bdh_sdk.ha.requests.get")
+    def test_unknown_instance(self, get):
+        self.assertIsNone(ha.get_entity_state("light.a", instance="nope"))
+        self.assertEqual(ha.call_service("light", "turn_on", "light.a", instance="nope")[0], False)
+        with self.assertRaises(ha.HAError):
+            ha.get_all_states(instance="nope")
+        get.assert_not_called()
+
+    def test_instances(self):
+        self.assertEqual([i["id"] for i in ha.instances()], ["mi", "bdl"])
+        ha.set_provider(None)
+        self.assertEqual(ha.instances(), [{"id": "ha", "name": "Home Assistant", "site": "", "default": True}])
+
+
 
 if __name__ == "__main__":
     unittest.main()

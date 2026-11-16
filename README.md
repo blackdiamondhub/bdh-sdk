@@ -403,15 +403,21 @@ if not is_admin(request):
 
 `bdh_sdk.ha` talks to Home Assistant for apps that need it (install the
 `bdh-sdk[ha]` extra; the hub already ships `requests` and `websocket-client`).
-The connection comes from `HOMEASSISTANT_URL` and
-`HOMEASSISTANT_ACCESS_TOKEN`, read from Django settings and then the
-environment.
+A hub can have several Home Assistant instances, typically one per site. Every
+call takes an optional `instance` id; without it the call goes to the default
+instance. `ha.instances()` lists them as dicts with `id`, `name`, `site` and
+`default`. The hub registers its instances with `ha.set_provider()`; without a
+provider there is one instance, `ha`, whose connection comes from
+`HOMEASSISTANT_URL` and `HOMEASSISTANT_ACCESS_TOKEN` (Django settings, then the
+environment).
 
 ```python
 from bdh_sdk import ha
 
 state = ha.get_entity_state("light.kitchen")       # dict or None
 ok, err = ha.call_service("light", "turn_on", "light.kitchen")
+for inst in ha.instances():                          # [{"id": "mi", ...}, ...]
+    states = ha.get_all_states(instance=inst["id"])
 ```
 
 Read helpers (`get_entity_state`, `get_entity_states`, `get_history`) return
