@@ -15,6 +15,7 @@ are exported, and :func:`import_rows` refuses rows of any other app.
 Needs Django; nothing here imports it until a function is called.
 """
 import argparse
+import json
 import os
 import sys
 
@@ -37,7 +38,10 @@ def export_rows(app_label, stream, using="default"):
     def rows():
         nonlocal count
         for model in _models(app_label):
-            for obj in model._default_manager.using(using).order_by("pk").iterator():
+            # Small chunks: rows can hold blobs, and the serializer already
+            # writes each row to the stream as it goes.
+            qs = model._default_manager.using(using).order_by("pk")
+            for obj in qs.iterator(chunk_size=100):
                 count += 1
                 yield obj
 
@@ -45,12 +49,71 @@ def export_rows(app_label, stream, using="default"):
     return count
 
 
+def iter_fixture(stream, chunk_size=64 * 1024):
+    """Yield the objects of a JSON fixture (a JSON array of objects) one at a time.
+
+    Django's ``json`` deserializer reads the whole file before it saves
+    anything, so an app with large rows (photos stored as blobs) needs memory
+    for the file, its parsed form and the model objects all at once. This
+    reads ``stream`` in chunks and holds one row at a time instead.
+    """
+    decoder = json.JSONDecoder()
+    buf, pos, eof = "", 0, False
+
+    def read_more():
+        nonlocal buf, pos, eof
+        # Read at least as much as is already buffered, so a row larger than
+        # one chunk is parsed a few times, not once per chunk.
+        chunk = stream.read(max(chunk_size, len(buf) - pos))
+        eof = not chunk
+        buf, pos = buf[pos:] + chunk, 0
+
+    def peek():
+        nonlocal pos
+        while True:
+            while pos < len(buf) and buf[pos] in " \t\r\n":
+                pos += 1
+            if pos < len(buf):
+                return buf[pos]
+            if eof:
+                return ""
+            read_more()
+
+    if peek() != "[":
+        raise ValueError("fixture is not a JSON array")
+    pos += 1
+    if peek() == "]":
+        pos += 1
+    else:
+        while True:
+            if peek() != "{":
+                raise ValueError("fixture rows must be JSON objects")
+            while True:
+                try:
+                    row, pos = decoder.raw_decode(buf, pos)
+                    break
+                except json.JSONDecodeError:
+                    if eof:
+                        raise
+                    read_more()
+            yield row
+            sep = peek()
+            pos += 1
+            if sep == "]":
+                break
+            if sep != ",":
+                raise ValueError("fixture is not a JSON array")
+    if peek():
+        raise ValueError("unexpected data after the fixture")
+
+
 def import_rows(app_label, stream, using="default", replace=False):
     """Load rows exported by :func:`export_rows` into ``app_label``; return the count.
 
     ``replace`` deletes the app's existing rows first. Everything happens in
     one transaction, and database sequences are reset afterwards so new rows
-    don't collide with imported primary keys.
+    don't collide with imported primary keys. Rows are read and saved one at
+    a time (:func:`iter_fixture`), so memory stays flat whatever the file size.
     """
     from django.core import serializers
     from django.core.management.color import no_style
@@ -62,7 +125,9 @@ def import_rows(app_label, stream, using="default", replace=False):
         if replace:
             for model in reversed(models):
                 model._default_manager.using(using).all().delete()
-        for obj in serializers.deserialize("json", stream, using=using):
+        # The "json" format is the "python" one after json.loads, so feeding
+        # the python deserializer row by row gives the same result.
+        for obj in serializers.deserialize("python", iter_fixture(stream), using=using):
             label = obj.object._meta.app_label
             if label != app_label:
                 raise ValueError(f"row of app {label!r} in a fixture for {app_label!r}")

@@ -533,7 +533,9 @@ python -m bdh_sdk.runtime.manage import_app_data /data/cameras.json [--replace]
 `export_app_data [label] [-o file]` is the container-side twin, and
 `python -m bdh_sdk.appdata import FILE` migrates a fresh container before
 loading. Imports run in one transaction, refuse rows of other apps and reset
-sequences; `--replace` deletes the app's existing rows first.
+sequences; `--replace` deletes the app's existing rows first. Both directions
+stream one row at a time, so a fixture full of blobs (photos) imports within
+the app's normal memory limit.
 
 ## Reusable CI for app repos
 

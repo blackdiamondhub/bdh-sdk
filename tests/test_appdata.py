@@ -1,4 +1,5 @@
 """bdh_sdk.appdata / export_app_data / import_app_data, end to end in subprocesses."""
+import io
 import json
 import os
 import subprocess
@@ -8,6 +9,8 @@ import textwrap
 import unittest
 from importlib.util import find_spec
 from pathlib import Path
+
+from bdh_sdk import appdata
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -64,6 +67,44 @@ print("RESULT" + json.dumps({
     "new_pk": new.pk,
 }))
 '''
+
+
+class _Chunked(io.StringIO):
+    """A stream that records the largest read and refuses read() of everything."""
+
+    def __init__(self, text):
+        super().__init__(text)
+        self.biggest = 0
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            raise AssertionError("whole-file read")
+        self.biggest = max(self.biggest, size)
+        return super().read(size)
+
+
+class IterFixtureTests(unittest.TestCase):
+    def rows(self, text, chunk_size=7):
+        return list(appdata.iter_fixture(_Chunked(text), chunk_size=chunk_size))
+
+    def test_streams_rows_in_small_reads(self):
+        rows = [{"model": "a.b", "pk": i, "fields": {"s": "x]},{[\"" * i, "blob": "QUJD" * 50}}
+                for i in range(20)]
+        stream = _Chunked(json.dumps(rows, indent=1))
+        self.assertEqual(list(appdata.iter_fixture(stream, chunk_size=16)), rows)
+        # Reads grow to about one row, never to the whole file.
+        self.assertLess(stream.biggest, len(json.dumps(rows[-1])) * 2 + 16)
+
+    def test_empty_and_whitespace(self):
+        self.assertEqual(self.rows("[]"), [])
+        self.assertEqual(self.rows(' \n[ \n ]\n'), [])
+        self.assertEqual(self.rows('[{"pk": 1}]\n'), [{"pk": 1}])
+
+    def test_rejects_malformed(self):
+        for bad in ["", "{}", "[1]", '[{"pk": 1} {"pk": 2}]', '[{"pk": 1}] x', '[{"pk": 1}',
+                    '[{"pk": 1},']:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.rows(bad)
 
 
 @unittest.skipIf(find_spec("django") is None or find_spec("whitenoise") is None,
