@@ -56,6 +56,10 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
 ]
 
+# Django's default "same-origin" strips the Referer from cross-origin requests, and
+# OpenStreetMap's tile servers answer those with an "Access blocked" tile.
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+
 ROOT_URLCONF = "bdh_sdk.runtime.urls"
 TEMPLATES = [
     {

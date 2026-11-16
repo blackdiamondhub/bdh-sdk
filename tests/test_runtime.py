@@ -62,7 +62,9 @@ def post(path, body, sign_body=True):
 out["health"] = c.get("/_bdh/health").json()
 out["unsigned"] = c.get("/demo/").status_code
 out["visitor"] = get("/demo/", {"u": "sam", "staff": True, "mode": "owner"}, Cookie="x=1").json()
-out["anon"] = get("/demo/").json()
+anon = get("/demo/")
+out["anon"] = anon.json()
+out["referrer_policy"] = anon.headers.get("Referrer-Policy")
 out["manifest"] = c.get("/_bdh/manifest", headers=identity.signed_headers(TOKEN, "GET", "/_bdh/manifest", body=b"")).json()
 out["manifest_unsigned"] = c.get("/_bdh/manifest").status_code
 out["hook"] = post("/_bdh/hook", {"hook": "status"}).json()
@@ -103,6 +105,9 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(out["unsigned"], 403)
         self.assertEqual(out["visitor"], {"user": "sam", "staff": True, "mode": "owner", "cookie": "1"})
         self.assertEqual(out["anon"], {"user": "", "staff": False, "mode": "guest", "cookie": ""})
+        # Map tile servers (OSM) block requests with no Referer, so cross-origin
+        # requests must still carry the app's origin.
+        self.assertEqual(out["referrer_policy"], "strict-origin-when-cross-origin")
         m = out["manifest"]
         self.assertEqual(m["id"], "demo")
         self.assertEqual(m["permissions"], ["alerts"])
