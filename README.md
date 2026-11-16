@@ -379,6 +379,9 @@ events.publish("cameras/doorbell/front", {"camera": "front"})  # your own events
   functions are called directly; `async def` handlers run as tasks there. An
   exception is logged and doesn't affect other handlers.
 - Delivery is best effort: nothing is replayed after a source reconnects.
+- In a container app, the SDK sends your subscriptions to the hub, retrying
+  until the hub has them if it can't be reached; the hub keeps them across
+  its own restarts.
 - `subscribe` returns a `Subscription` with `cancel()`. Subscribe from your
   `AppConfig.ready()` (or your worker), never at `plugin.py` import time.
 - `publish` is thread-safe and never blocks; async code can
