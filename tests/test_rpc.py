@@ -132,6 +132,22 @@ class InstalledTests(unittest.TestCase):
                          {"domain": "light", "service": "turn_on", "entity_id": "light.a",
                           "extra_data": {"brightness": 9}})
 
+    def test_ha_instance_is_forwarded(self):
+        self.broker.on("ha.get_all_states", lambda p: [{"entity_id": "x", "i": p.get("instance")}])
+        self.assertEqual(ha.get_all_states(instance="bdl"), [{"entity_id": "x", "i": "bdl"}])
+        self.assertEqual(ha.get_all_states(), [{"entity_id": "x", "i": None}])
+        self.assertEqual(self.broker.ops("ha.get_all_states")[-1], {})
+        self.broker.on("ha.call_service", lambda p: [True, None])
+        ha.call_service("light", "turn_on", "light.a", instance="bdl")
+        self.assertEqual(self.broker.ops("ha.call_service")[-1]["instance"], "bdl")
+        self.assertEqual(ha.instances()[0]["id"], "ha")
+
+    def test_ha_instances_on_old_hub(self):
+        def missing(payload):
+            raise FakeBroker.Error("unknown_op", "no op", 404)
+        self.broker.on("ha.instances", missing)
+        self.assertEqual([i["id"] for i in ha.instances()], ["ha"])
+
     def test_ha_errors_map_to_ha_error(self):
         def fail(payload):
             raise FakeBroker.Error("ha_error", "HA said no", 500)

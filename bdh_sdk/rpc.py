@@ -49,7 +49,7 @@ APP_ENV = "BDH_APP_ID"
 _READ_OPS = frozenset({
     "settings.get", "state.get", "state.keys", "hub.brand",
     "ha.get_entity_state", "ha.get_entity_states", "ha.get_history",
-    "ha.get_all_states", "ha.get_static", "speakers.list", "secrets.get",
+    "ha.get_all_states", "ha.get_static", "ha.instances", "speakers.list", "secrets.get",
 })
 _RETRY_STATUS = frozenset({502, 503, 504})
 
@@ -309,40 +309,60 @@ class HABackend:
                 raise ha.HAError(str(exc)) from None
             raise
 
-    def get_entity_state(self, entity_id):
-        return self._call("get_entity_state", {"entity_id": entity_id})
+    def _with(self, payload, instance):
+        if instance is not None:
+            payload["instance"] = instance
+        return payload
 
-    def get_entity_states(self, entity_ids):
-        return self._call("get_entity_states", {"entity_ids": list(entity_ids)}) or {}
+    def instances(self):
+        from . import ha
+        try:
+            return self._call("instances")
+        except BrokerError as exc:
+            if exc.code != "unknown_op":
+                raise
+        # A hub from before multi-instance support has just the default.
+        return [{"id": ha.DEFAULT_INSTANCE, "name": "Home Assistant", "site": "", "default": True}]
 
-    def get_history(self, entity_ids, start, end=None):
-        res = self._call("get_history", {"entity_ids": list(entity_ids),
-                                         "start": _iso(start), "end": _iso(end)}) or {}
+    def get_entity_state(self, entity_id, instance=None):
+        return self._call("get_entity_state", self._with({"entity_id": entity_id}, instance))
+
+    def get_entity_states(self, entity_ids, instance=None):
+        return self._call("get_entity_states",
+                          self._with({"entity_ids": list(entity_ids)}, instance)) or {}
+
+    def get_history(self, entity_ids, start, end=None, instance=None):
+        res = self._call("get_history", self._with({"entity_ids": list(entity_ids),
+                                                    "start": _iso(start), "end": _iso(end)},
+                                                   instance)) or {}
         return {eid: [tuple(p) for p in points] for eid, points in res.items()}
 
-    def call_service(self, domain, service, entity_id, extra_data=None):
-        ok, err = self._call("call_service", {"domain": domain, "service": service,
-                                              "entity_id": entity_id, "extra_data": extra_data})
+    def call_service(self, domain, service, entity_id, extra_data=None, instance=None):
+        ok, err = self._call("call_service", self._with({"domain": domain, "service": service,
+                                                         "entity_id": entity_id,
+                                                         "extra_data": extra_data}, instance))
         return ok, err
 
-    def upload_media(self, folder, filename, data, content_type):
-        return self._call("upload_media", {"folder": folder, "filename": filename,
-                                           "data": _b64(data), "content_type": content_type},
+    def upload_media(self, folder, filename, data, content_type, instance=None):
+        return self._call("upload_media", self._with({"folder": folder, "filename": filename,
+                                                      "data": _b64(data),
+                                                      "content_type": content_type}, instance),
                           timeout=60)
 
-    def get_tts(self, engine_id, message, options=None):
-        res = self._call("get_tts", {"engine_id": engine_id, "message": message,
-                                     "options": options}, timeout=60)
+    def get_tts(self, engine_id, message, options=None, instance=None):
+        res = self._call("get_tts", self._with({"engine_id": engine_id, "message": message,
+                                                "options": options}, instance), timeout=60)
         return _unb64(res["audio"]), res["content_type"]
 
-    def get_all_states(self):
-        return self._call("get_all_states") or []
+    def get_all_states(self, instance=None):
+        return self._call("get_all_states", self._with({}, instance) or None) or []
 
-    def get_static(self, path):
-        return _unb64(self._call("get_static", {"path": path}))
+    def get_static(self, path, instance=None):
+        return _unb64(self._call("get_static", self._with({"path": path}, instance)))
 
-    def ws_commands(self, *messages):
-        return self._call("ws_commands", {"messages": list(messages)}, timeout=30)
+    def ws_commands(self, *messages, instance=None):
+        return self._call("ws_commands", self._with({"messages": list(messages)}, instance),
+                          timeout=30)
 
 
 class SpeakersBackend:

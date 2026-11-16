@@ -239,6 +239,8 @@ class FakeBroker:
             self.state.pop(key, None)
         elif op == "state.keys":
             return sorted(k for a, k in self.state if a == p.get("app"))
+        elif op == "ha.instances":
+            return [{"id": "ha", "name": "Home Assistant", "site": "", "default": True}]
         return None
 
     def _secret(self, op, p):
