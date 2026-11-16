@@ -497,6 +497,12 @@ and the hub proxies to it inside an iframe.
 - `bdh/embed.js` talks to the hub shell with `postMessage` (title, resize,
   activity, navigate, toast, theme, open-overlay). `theme` sends the page's
   background colour so the hub paints it behind the frame (no white flash).
+  `bdh.stats(fn)` adds the object `fn()` returns to the hub's remote
+  `frame state` (development only). While the hub's remote is on it can drive
+  the app's frame: the first `remote` message loads `bdh/embed-remote.js`, which
+  runs a fixed set of commands (`state`, `query`, `tap`, `swipe`, `key`,
+  `measure`, `logs`; no eval) and stands in for fullscreen, which synthetic taps
+  can't request.
 
 Manifest fields for the app store: `permissions`, `network`
 (`none`/`outbound`/`lan`), `lifecycle` (`always`/`on_demand`), `memory_mb`,

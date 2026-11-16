@@ -13,11 +13,26 @@
  *   open-overlay  {kind, ...}           ask the hub to open one of its overlays
  *
  * window.bdh: send(type, data), navigate(target), toast(message, level),
- *             on(type, fn) for messages from the hub.
+ *             on(type, fn) for messages from the hub,
+ *             stats(fn) adds app numbers to the hub's remote `frame state`.
+ *
+ * A {type: 'remote', id, cmd, args} message from the hub (only sent while the
+ * hub's development remote is on) loads embed-remote.js, which runs a fixed set
+ * of commands and answers with {type: 'remote-result', id, ok, value | error}.
  */
 (function () {
     'use strict';
     if (window.bdh) return;
+    var script = document.currentScript;
+
+    // Page errors from the start, for the remote's `logs` (it loads later).
+    var errors = [];
+    function pageError(text) {
+        errors.push({t: Date.now(), level: 'error', text: String(text).slice(0, 2000)});
+        if (errors.length > 50) errors.shift();
+    }
+    window.addEventListener('error', function (e) { pageError(e.message + ' @ ' + e.filename + ':' + e.lineno); });
+    window.addEventListener('unhandledrejection', function (e) { pageError('unhandled rejection: ' + (e.reason && (e.reason.stack || e.reason))); });
 
     var meta = document.querySelector('meta[name="bdh-hub-origin"]');
     var hubOrigin = '';
@@ -52,6 +67,8 @@
         });
     });
 
+    var statsProviders = [];
+
     window.bdh = {
         embedded: framed && !!hubOrigin,
         hubOrigin: hubOrigin,
@@ -59,8 +76,30 @@
         navigate: navigate,
         toast: function (message, level) { return send('toast', {message: String(message), level: level || 'info'}); },
         on: on,
+        stats: function (fn) { if (typeof fn === 'function') statsProviders.push(fn); },
+        _statsProviders: statsProviders,
+        _errors: errors,
     };
     if (!window.bdh.embedded) return;
+    document.documentElement.classList.add('bdh-embedded');
+
+    var agent = null;
+    function loadAgent() {
+        if (!agent) agent = new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.src = new URL('embed-remote.js', script ? script.src : location.href).href;
+            s.onload = function () { window.bdh._remote ? resolve(window.bdh._remote) : reject(new Error('remote agent missing')); };
+            s.onerror = function () { agent = null; reject(new Error('could not load embed-remote.js')); };
+            document.head.appendChild(s);
+        });
+        return agent;
+    }
+    on('remote', function (d) {
+        loadAgent().then(function (run) { return run(d.cmd, d.args || {}); })
+            .then(function (value) { send('remote-result', {id: d.id, ok: true, value: value}); },
+                  function (err) { send('remote-result', {id: d.id, ok: false, error: String(err && (err.stack || err))}); });
+    });
+
     document.documentElement.classList.add('bdh-embedded');
 
     // Activity, at most every 5 s, so the hub's screensaver and idle timers see touches.
