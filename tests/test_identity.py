@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -42,14 +44,11 @@ class SigningTests(unittest.TestCase):
         self.assertIsNone(ident.verify(TOKEN, "POST", "/_bdh/hook", h, body=b'{"a":2}', now=NOW))
         self.assertIsNone(ident.verify(TOKEN, "POST", "/_bdh/hook", h, now=NOW))
 
-    def test_v2_headers_alongside_v1(self):
+    def test_each_request_gets_a_new_nonce(self):
         h = ident.signed_headers(TOKEN, "GET", "/x/?a=1", {"u": "steve"}, now=NOW)
         self.assertTrue(h[ident.HEADER_NONCE])
         self.assertNotEqual(h[ident.HEADER_NONCE],
                             ident.signed_headers(TOKEN, "GET", "/x/?a=1", now=NOW)[ident.HEADER_NONCE])
-        # What an SDK before 0.27 checks still holds.
-        self.assertEqual(h[ident.HEADER_SIGNATURE],
-                         ident.sign(TOKEN, "GET", "/x/?a=1", NOW, h[ident.HEADER_IDENTITY]))
 
     def test_replayed_nonce_is_refused(self):
         cache = ident.NonceCache()
@@ -73,12 +72,12 @@ class SigningTests(unittest.TestCase):
                 self.assertIsNone(ident.verify(TOKEN, "POST", path, headers, now=NOW,
                                                nonces=ident.NonceCache()))
 
-    def test_legacy_v1_still_accepted(self):
+    def test_v1_signature_is_refused(self):
         h = ident.signed_headers(TOKEN, "GET", "/x/", {"u": "steve"}, now=NOW)
-        legacy = {k: v for k, v in h.items()
-                  if k not in (ident.HEADER_NONCE, ident.HEADER_SIGNATURE_V2)}
-        with self.assertLogs("bdh_sdk.identity", "DEBUG"):
-            self.assertEqual(ident.verify(TOKEN, "GET", "/x/", legacy, now=NOW), {"u": "steve"})
+        msg = "\n".join(("GET", "/x/", str(NOW), h[ident.HEADER_IDENTITY], ident.NO_BODY))
+        v1 = {ident.HEADER_TIME: h[ident.HEADER_TIME], ident.HEADER_IDENTITY: h[ident.HEADER_IDENTITY],
+              "X-BDH-Signature": hmac.new(TOKEN.encode(), msg.encode(), hashlib.sha256).hexdigest()}
+        self.assertIsNone(ident.verify(TOKEN, "GET", "/x/", v1, now=NOW))
 
     def test_nonce_cache_expires_and_is_bounded(self):
         cache = ident.NonceCache(size=2)
