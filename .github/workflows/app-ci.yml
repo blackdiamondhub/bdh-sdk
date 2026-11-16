@@ -83,6 +83,10 @@ jobs:
       TEST_MODULE: ${{ inputs.test_module || inputs.app_id }}
       DJANGO_SETTINGS_MODULE: BlackDiamondHub.settings_test
       DJANGO_SECRET_KEY: ci
+      # A copy of the hub's default site with every app in-process (see the
+      # "Use a CI site" step): a site that runs the app as a container
+      # leaves it out of INSTALLED_APPS, so its tests could not import.
+      HUB_SITE: ci
     steps:
       - name: Checkout app
         uses: actions/checkout@v4
@@ -105,6 +109,13 @@ jobs:
         run: |
           rm -rf "$APP_ID"
           sed -i "/['\"]${APP_ID}\.plugin\.spec['\"]/d" BlackDiamondHub/settings.py
+
+      - name: Use a CI site
+        working-directory: hub
+        run: |
+          default=$(python3 -c "import re;print(re.search(r'DEFAULT_SITE = \"(\w+)\"', open('hub/site.py').read())[1])")
+          cp -r "sites/$default" sites/ci
+          sed -i '/^[[:space:]]*runtime[[:space:]]*=/d' sites/ci/site.toml
 
       - uses: actions/setup-python@v5
         with:
@@ -152,6 +163,10 @@ jobs:
       TEST_MODULE: ${{ inputs.test_module || inputs.app_id }}
       DJANGO_SETTINGS_MODULE: BlackDiamondHub.settings_test
       DJANGO_SECRET_KEY: ci
+      # A copy of the hub's default site with every app in-process (see the
+      # "Use a CI site" step): a site that runs the app as a container
+      # leaves it out of INSTALLED_APPS, so its tests could not import.
+      HUB_SITE: ci
     steps:
       - name: Checkout app
         uses: actions/checkout@v4
@@ -174,6 +189,13 @@ jobs:
         run: |
           rm -rf "$APP_ID"
           sed -i "/['\"]${APP_ID}\.plugin\.spec['\"]/d" BlackDiamondHub/settings.py
+
+      - name: Use a CI site
+        working-directory: hub
+        run: |
+          default=$(python3 -c "import re;print(re.search(r'DEFAULT_SITE = \"(\w+)\"', open('hub/site.py').read())[1])")
+          cp -r "sites/$default" sites/ci
+          sed -i '/^[[:space:]]*runtime[[:space:]]*=/d' sites/ci/site.toml
 
       - uses: actions/setup-python@v5
         with:
