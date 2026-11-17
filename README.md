@@ -391,6 +391,55 @@ events.publish("cameras/doorbell/front", {"camera": "front"})  # your own events
 - Tests: `events.flush()` waits for pending handlers and `events.reset()`
   drops all subscriptions.
 
+## Shares
+
+`bdh_sdk.shares` lets one app publish files that other apps read, e.g. an
+events app publishing an iCalendar feed (with photos) for the calendar app.
+The provider declares each share in its spec; the hub admin grants each
+consumer per share (Settings → Apps → *provider* → Sharing). Consumers list
+the MIME types they understand in `reads`, which only decides who the hub
+suggests; it isn't a permission.
+
+```python
+spec = PluginSpec(id="sunpeaks", app="sunpeaks",
+                  shares=[{"name": "events", "type": "text/calendar",
+                           "title": "Sun Peaks events"}])
+# a consumer: PluginSpec(id="calendar", ..., reads=["text/calendar"])
+
+from bdh_sdk import shares
+
+# provider: the .ics refers to photos as IMAGE;VALUE=URI:bdh-share:<key>
+rev = shares.publish("events", ics_bytes,
+                     attachments={"p1": (jpeg_bytes, "image/jpeg")},
+                     expected_revision=None)
+
+# consumer
+shares.list_shares()   # [{"provider", "name", "title", "type", "revision", "updated"}]
+opened = shares.open_share("sunpeaks", "events", if_revision=last_seen)  # None: unchanged
+url = shares.resolve("bdh-share:p1", opened, request.bdh_hub_origin)     # None: unknown key
+```
+
+- Each publish is a new immutable revision (the hub keeps the latest two):
+  one main file of the declared type plus up to 200 image attachments
+  (`image/jpeg`, `image/png`, `image/webp`). Keys match
+  `[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}`. Blobs are at most 6 MB
+  (`text/calendar` 2 MB, UTF-8), 50 MB in all per provider.
+- `publish` hashes everything locally and only uploads the blobs the hub
+  doesn't have, one at a time. `expected_revision` makes it fail with
+  `invalid` unless the share is still at that revision.
+- `Opened` has `revision`, `type`, `title`, `data` (bytes) and
+  `attachments` (`{key: "/apps/_share/<sha256>"}`, served publicly by the hub).
+- After a publish the hub sends the event `_shares/<provider>/<name>`
+  (`{"provider", "name", "revision"}`) to the provider and granted consumers.
+  Sleeping apps miss it, so also reopen with `if_revision` when rendering or
+  starting.
+- Failures raise `SharesError` with `.code` `forbidden` (not granted),
+  `not_found`, `invalid`, `too_large` or `unavailable` (no broker: shares
+  only work in a container app).
+- Tests: `FakeBroker` runs the share ops in memory as its `app_id` (change it
+  to act as another app); see `set_manifest_shares`, `grant_share`,
+  `revoke_share` and `share_events`.
+
 ## Admin check
 
 `is_admin(request)` is true when a signed-in, active hub admin (Django staff
@@ -508,14 +557,14 @@ and the hub proxies to it inside an iframe.
 
 Manifest fields for the app store: `permissions`, `network`
 (`none`/`outbound`/`lan`), `lifecycle` (`always`/`on_demand`), `memory_mb`,
-`companions`, `wake_every`. An `on_demand` app is stopped after 10 idle
+`companions`, `wake_every`, `shares`, `reads`. An `on_demand` app is stopped after 10 idle
 minutes; while it sleeps the hub shows its last status, card and stats and
 only wakes it when they are older than `wake_every` seconds (0 = the hub's
 default, 6 hours). Apps that must update sooner should use `always`.
 
 `bdh_sdk.testing.FakeBroker` is an in-process broker for app tests: register
 handlers with `.on(op, fn)` and check `.calls`. It answers `ha.registry` from
-`.registry`.
+`.registry` and runs `shares.*` in memory.
 
 `python -m bdh_sdk.runtime.manage <command>` runs Django management commands
 in the container (without starting the app's server or background workers).
