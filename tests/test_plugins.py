@@ -134,6 +134,40 @@ class ManifestTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     PluginSpec(id="a", app="a", **kwargs)
 
+    def test_shares_and_reads(self):
+        self.assertEqual(PluginSpec(id="a", app="a").manifest()["shares"], [])
+        self.assertEqual(PluginSpec(id="a", app="a").manifest()["reads"], [])
+        share = {"name": "events", "type": "text/calendar", "title": "Sun Peaks events"}
+        spec = PluginSpec(id="sp", app="sp", shares=[share], reads=["text/calendar", "image/png",
+                                                                      "text/calendar"])
+        self.assertEqual(spec.shares, (share,))
+        self.assertEqual(spec.manifest()["shares"], [share])
+        self.assertEqual(spec.manifest()["reads"], ["image/png", "text/calendar"])
+        hash(spec)
+
+    def test_rejects_bad_shares(self):
+        ok = {"name": "events", "type": "text/calendar", "title": "Events"}
+        bad = [
+            [{**ok, "name": "Events"}],
+            [{**ok, "name": "-x"}],
+            [{**ok, "name": "x" * 41}],
+            [{**ok, "type": "calendar"}],
+            [{**ok, "type": "Text/Calendar"}],
+            [{**ok, "title": ""}],
+            [{**ok, "title": "x" * 81}],
+            [{**ok, "extra": 1}],
+            [{"name": "events", "type": "text/calendar"}],
+            [ok, {**ok, "title": "Again"}],
+            ["events"],
+            ok,
+        ]
+        for shares in bad:
+            with self.subTest(shares=str(shares)), self.assertRaises(ValueError):
+                PluginSpec(id="a", app="a", shares=shares)
+        for reads in (["calendar"], ["text/calendar "], "text/calendar"):
+            with self.subTest(reads=reads), self.assertRaises(ValueError):
+                PluginSpec(id="a", app="a", reads=reads)
+        PluginSpec(id="a", app="a", shares=[{**ok, "name": "x" * 40, "title": "x" * 80}])
 
 if __name__ == "__main__":
     unittest.main()

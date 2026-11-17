@@ -65,6 +65,16 @@ _PERMISSION_RE = re.compile(
 def valid_permission(perm: str) -> bool:
     return isinstance(perm, str) and bool(_PERMISSION_RE.fullmatch(perm))
 
+# Shares an app publishes for other apps (see bdh_sdk.shares).
+_SHARE_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+_MIME_RE = re.compile(r"[a-z]+/[a-z0-9.+-]+")
+SHARE_KEYS = frozenset({"name", "type", "title"})
+MAX_SHARE_TITLE = 80
+
+
+def valid_mime(mime: str) -> bool:
+    return isinstance(mime, str) and bool(_MIME_RE.fullmatch(mime))
+
 # Entry point group that separately installed apps register their spec under.
 ENTRY_POINT_GROUP = "blackdiamondhub.plugins"
 
@@ -440,6 +450,13 @@ class PluginSpec:
     ``wake_every`` (seconds, 0 = hub default) is how old an ``on_demand``
     app's cached status/stats may get before the hub wakes it to refresh
     them; while it sleeps the hub shows the last answer.
+
+    ``shares`` declares the files the app publishes for other apps with
+    :mod:`bdh_sdk.shares`: dicts with ``name`` (``[a-z0-9][a-z0-9_-]*``, at
+    most 40 chars, unique), ``type`` (the main file's MIME type) and
+    ``title`` (1-80 chars). ``reads`` lists the MIME types the app can
+    consume; the hub only uses it to suggest consumers when the admin grants
+    a share. Neither is a permission.
     """
 
     id: str
@@ -465,8 +482,11 @@ class PluginSpec:
     memory_mb: int = DEFAULT_MEMORY_MB
     companions: tuple[str, ...] = field(default_factory=tuple)
     wake_every: int = 0
+    shares: tuple[dict, ...] = field(default_factory=tuple, hash=False)
+    reads: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
+        self._check_shares()
         keys = [key for key, _label in self.stat_keys]
         if len(keys) != len(set(keys)):
             raise ValueError(f"plugin {self.id!r} has duplicate stat_keys")
@@ -492,6 +512,34 @@ class PluginSpec:
                 f"plugin {self.id!r} wake_every must be 0 or {MIN_WAKE_EVERY}..{MAX_WAKE_EVERY} seconds"
             )
 
+    def _check_shares(self):
+        if isinstance(self.shares, (str, bytes, dict)) or isinstance(self.reads, (str, bytes)):
+            raise ValueError(f"plugin {self.id!r} shares and reads must be lists")
+        shares = []
+        for share in self.shares:
+            if not isinstance(share, dict) or set(share) != SHARE_KEYS:
+                raise ValueError(
+                    f"plugin {self.id!r} shares must be dicts with exactly {sorted(SHARE_KEYS)}"
+                )
+            name, mime, title = share["name"], share["type"], share["title"]
+            if not isinstance(name, str) or not _SHARE_NAME_RE.fullmatch(name):
+                raise ValueError(f"plugin {self.id!r} has invalid share name {name!r}")
+            if not valid_mime(mime):
+                raise ValueError(f"plugin {self.id!r} share {name!r} has invalid type {mime!r}")
+            if not isinstance(title, str) or not 1 <= len(title) <= MAX_SHARE_TITLE:
+                raise ValueError(
+                    f"plugin {self.id!r} share {name!r} title must be 1-{MAX_SHARE_TITLE} chars"
+                )
+            shares.append({"name": name, "type": mime, "title": title})
+        names = [s["name"] for s in shares]
+        if len(names) != len(set(names)):
+            raise ValueError(f"plugin {self.id!r} has duplicate share names")
+        for mime in self.reads:
+            if not valid_mime(mime):
+                raise ValueError(f"plugin {self.id!r} has invalid reads type {mime!r}")
+        object.__setattr__(self, "shares", tuple(shares))
+        object.__setattr__(self, "reads", tuple(self.reads))
+
     def manifest(self) -> dict:
         """The container/runtime facts the store and supervisor need."""
         return {
@@ -504,6 +552,8 @@ class PluginSpec:
             "companions": list(self.companions),
             "wake_every": self.wake_every,
             "provides": sorted(self.provides),
+            "shares": [dict(s) for s in self.shares],
+            "reads": sorted(set(self.reads)),
         }
 
     @property

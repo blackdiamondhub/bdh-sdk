@@ -121,7 +121,12 @@ class FakeBroker:
     (``{(app, key): value}``), and ``secrets.*`` from :attr:`secrets`
     (``{(app, name): value}``) for the broker's own :attr:`app_id` only, the
     way the hub ties secrets to the app's token, and ``ha.registry`` from
-    :attr:`registry` (narrowed by the payload's ``platform``). Anything else answers ``None`` unless a
+    :attr:`registry` (narrowed by the payload's ``platform``). It runs the
+    ``shares.*`` ops in memory under the hub's rules, with the broker's
+    :attr:`app_id` as the caller (set it to act as another app): declare
+    shares with :meth:`set_manifest_shares`, grant them with
+    :meth:`grant_share` / :meth:`revoke_share`; notifications land in
+    :attr:`share_events` as ``(recipient, topic, payload)``. Anything else answers ``None`` unless a
     handler is registered with :meth:`on` (``fn(payload) -> result``; raise
     :class:`FakeBroker.Error` to fail the call). Ops outside :attr:`grants`
     (fnmatch patterns; default everything) get 403. Use as a context manager;
@@ -142,6 +147,11 @@ class FakeBroker:
         self.state = {}
         self.secrets = {}
         self.registry = {"entities": [], "devices": [], "unit_system": {}}
+        self.share_manifests = {}  # app_id -> [{"name", "type", "title"}]
+        self.share_blobs = {}  # (owner, sha256) -> {"mime", "size", "data"}
+        self.share_revisions = {}  # (provider, name) -> [{"revision", "main", "attachments", "updated"}]
+        self.share_grants = set()  # (consumer, provider, name)
+        self.share_events = []  # (recipient app_id, topic, payload)
         self.handlers = {}
         self._install = install
         self._server = None
@@ -155,6 +165,20 @@ class FakeBroker:
     def ops(self, op):
         """Payloads of every call to ``op``, in order."""
         return [p for o, p in self.calls if o == op]
+
+    def set_manifest_shares(self, app_id, shares):
+        """Declare ``app_id``'s shares, as its ``PluginSpec.shares`` would."""
+        self.share_manifests[app_id] = [
+            {"name": s["name"], "type": s["type"], "title": s.get("title", s["name"])}
+            for s in shares
+        ]
+
+    def grant_share(self, consumer, provider, name):
+        """Let ``consumer`` open ``provider``'s share ``name``."""
+        self.share_grants.add((consumer, provider, name))
+
+    def revoke_share(self, consumer, provider, name):
+        self.share_grants.discard((consumer, provider, name))
 
     def start(self):
         import http.server
@@ -230,6 +254,8 @@ class FakeBroker:
     def _default(self, op, p):
         if op.startswith("secrets."):
             return self._secret(op, p)
+        if op.startswith("shares."):
+            return self._share(op, p)
         key = (p.get("app"), p.get("key"))
         if op == "settings.get":
             return {"found": key in self.settings, "value": self.settings.get(key)}
@@ -269,4 +295,118 @@ class FakeBroker:
             self.secrets[key] = value
         elif op == "secrets.delete":
             self.secrets.pop(key, None)
+        return None
+
+    # Shares: the hub's rules (bdh_sdk.shares), kept in memory. The caller is
+    # always this broker's app_id; change it to act as another app.
+    SHARE_TYPES = {"text/calendar": 2 * 1024 * 1024, "image/jpeg": None,
+                   "image/png": None, "image/webp": None}
+    SHARE_MAX_BLOB = 6 * 1024 * 1024
+    SHARE_QUOTA = 50 * 1024 * 1024
+    SHARE_MAX_ATTACHMENTS = 200
+    SHARE_KEEP = 2
+
+    def _share(self, op, p):
+        import base64
+        import binascii
+        import hashlib
+        import re
+        from datetime import datetime, timezone
+
+        me = self.app_id
+        hex_re = re.compile(r"[0-9a-f]{64}")
+        if op == "shares.missing":
+            hashes = p.get("sha256")
+            if (not isinstance(hashes, list) or len(hashes) > 500
+                    or not all(isinstance(h, str) and hex_re.fullmatch(h) for h in hashes)):
+                raise FakeBroker.Error("invalid", "sha256 must be a list of at most 500 hex digests")
+            return {"missing": [h for h in hashes if (me, h) not in self.share_blobs]}
+        if op == "shares.put_blob":
+            mime, text = p.get("mime"), p.get("data_b64")
+            if mime not in self.SHARE_TYPES or not isinstance(text, str):
+                raise FakeBroker.Error("invalid", f"unsupported mime {mime!r}")
+            try:
+                data = base64.b64decode(text, validate=True)
+            except (binascii.Error, ValueError):
+                raise FakeBroker.Error("invalid", "bad data_b64") from None
+            limit = self.SHARE_TYPES[mime] or self.SHARE_MAX_BLOB
+            if len(data) > min(limit, self.SHARE_MAX_BLOB):
+                raise FakeBroker.Error("too_large", "blob too large")
+            if mime == "text/calendar":
+                try:
+                    data.decode("utf-8")
+                except UnicodeDecodeError:
+                    raise FakeBroker.Error("invalid", "text/calendar must be UTF-8") from None
+            sha = hashlib.sha256(data).hexdigest()
+            if (me, sha) not in self.share_blobs:
+                used = sum(b["size"] for (o, _), b in self.share_blobs.items() if o == me)
+                if used + len(data) > self.SHARE_QUOTA:
+                    raise FakeBroker.Error("too_large", "share quota exceeded")
+                self.share_blobs[(me, sha)] = {"mime": mime, "size": len(data), "data": data}
+            return {"sha256": sha}
+        if op == "shares.publish":
+            name = p.get("name")
+            decl = self._share_decl(me, name)
+            if decl is None:
+                raise FakeBroker.Error("invalid", f"share {name!r} is not declared")
+            main = self.share_blobs.get((me, p.get("main")))
+            if main is None or main["mime"] != decl["type"]:
+                raise FakeBroker.Error("invalid", f"main must be your own {decl['type']} blob")
+            atts = p.get("attachments") or {}
+            if not isinstance(atts, dict) or len(atts) > self.SHARE_MAX_ATTACHMENTS:
+                raise FakeBroker.Error("invalid", "too many attachments")
+            key_re = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}")
+            for key, sha in atts.items():
+                if not isinstance(key, str) or not key_re.fullmatch(key):
+                    raise FakeBroker.Error("invalid", f"bad attachment key {key!r}")
+                blob = self.share_blobs.get((me, sha))
+                if blob is None or not blob["mime"].startswith("image/"):
+                    raise FakeBroker.Error("invalid", f"attachment {key!r} must be your own image blob")
+            revs = self.share_revisions.setdefault((me, name), [])
+            current = revs[-1]["revision"] if revs else 0
+            expected = p.get("expected_revision")
+            if expected is not None and expected != current:
+                raise FakeBroker.Error("invalid", f"conflict: revision is {current}, not {expected}")
+            revs.append({"revision": current + 1, "main": p["main"], "attachments": dict(atts),
+                         "updated": datetime.now(timezone.utc).isoformat()})
+            del revs[:-self.SHARE_KEEP]
+            payload = {"provider": me, "name": name, "revision": current + 1}
+            recipients = [me] + sorted(c for c, pr, n in self.share_grants
+                                       if pr == me and n == name and c != me)
+            for app in recipients:
+                self.share_events.append((app, f"_shares/{me}/{name}", payload))
+            return {"revision": current + 1}
+        if op == "shares.list":
+            out = []
+            for provider, decls in sorted(self.share_manifests.items()):
+                for decl in decls:
+                    if provider != me and (me, provider, decl["name"]) not in self.share_grants:
+                        continue
+                    revs = self.share_revisions.get((provider, decl["name"])) or []
+                    out.append({"provider": provider, "name": decl["name"], "title": decl["title"],
+                                "type": decl["type"],
+                                "revision": revs[-1]["revision"] if revs else 0,
+                                "updated": revs[-1]["updated"] if revs else None})
+            return {"shares": out}
+        if op == "shares.open":
+            provider, name = p.get("provider"), p.get("name")
+            if provider != me and (me, provider, name) not in self.share_grants:
+                raise FakeBroker.Error("forbidden", "share not granted", status=403)
+            decl = self._share_decl(provider, name)
+            revs = self.share_revisions.get((provider, name)) or []
+            if decl is None or not revs:
+                raise FakeBroker.Error("not_found", "no such share", status=404)
+            rev = revs[-1]
+            if p.get("if_revision") == rev["revision"]:
+                return {"revision": rev["revision"], "not_modified": True}
+            main = self.share_blobs[(provider, rev["main"])]["data"]
+            return {"revision": rev["revision"], "type": decl["type"], "title": decl["title"],
+                    "data_b64": base64.b64encode(main).decode("ascii"),
+                    "attachments": {k: f"/apps/_share/{sha}" for k, sha in rev["attachments"].items()}}
+        raise FakeBroker.Error("unknown_op", op, status=404)
+
+    def _share_decl(self, app_id, name):
+        for decl in self.share_manifests.get(app_id, ()):
+            if decl["name"] == name:
+                return decl
         return None
