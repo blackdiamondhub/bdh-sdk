@@ -67,6 +67,11 @@ on:
         required: false
         type: number
         default: 5
+      stack_e2e:
+        description: Also install the image into the real hub + supervisor stack (BlackDiamondHub stack-e2e). Needs image.
+        required: false
+        type: boolean
+        default: false
     secrets:
       hub_token:
         description: Token to read BlackDiamondHub if it is private. Defaults to GITHUB_TOKEN.
@@ -284,3 +289,34 @@ jobs:
             cat "$RUNNER_TEMP/image/bdh-lock.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the image for stack-e2e
+        if: ${{ inputs.stack_e2e }}
+        env:
+          HUB_API: ${{ inputs.hub_api }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/stack-app"
+          mkdir -p "$out"
+          cp "$RUNNER_TEMP"/image/bdh-app.json "$RUNNER_TEMP"/image/*.whl "$out/"
+          app=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$out/bdh-app.json")
+          docker save -o "$out/image.tar" "bdh-app-$app:candidate"
+          docker image inspect -f '{{index .RepoDigests 0}}' "ghcr.io/blackdiamondlodge/bdh-app-runtime:hub-api-$HUB_API" > "$out/base.txt"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.stack_e2e }}
+        with:
+          name: stack-e2e-app
+          path: ${{ runner.temp }}/stack-app
+          retention-days: 1
+          compression-level: 0
+
+  stack-e2e:
+    # The image above installed by the real hub and supervisor, with the
+    # rest of the stack pinned by the hub's tests/e2e/stack.lock.json.
+    needs: image
+    if: ${{ inputs.stack_e2e && inputs.image }}
+    uses: blackdiamondlodge/BlackDiamondHub/.github/workflows/stack-e2e.yml@aa988d7a89c323967b4c701941c6be1327a0f376
+    with:
+      app_artifact: stack-e2e-app
+      sdk_ref: ${{ inputs.sdk_ref }}
