@@ -126,3 +126,22 @@ class RuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RuntimeTemplateLayoutTests(unittest.TestCase):
+    """Runtime pages render inside the hub's iframe, already below the hub
+    navbar, so they must not reserve space for it (top:62px, 100vh-62px,
+    phone 118px) or scope rules under the hub's ``.navbar``."""
+
+    def test_no_hub_navbar_offsets(self):
+        import re
+        import bdh_sdk.runtime as rt
+        root = Path(rt.__file__).resolve().parent / "templates"
+        self.assertTrue(root.is_dir())
+        pattern = re.compile(r"top\s*:\s*(6[0-9]|118)px|100vh\s*-\s*(6[0-9]|118)px|\.navbar(?![-\w])")
+        hits = []
+        for path in root.glob("**/*.html"):
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if pattern.search(line):
+                    hits.append(f"{path.relative_to(root)}:{n}: {line.strip()}")
+        self.assertEqual(hits, [])
