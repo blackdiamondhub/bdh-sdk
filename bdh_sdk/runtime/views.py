@@ -53,6 +53,29 @@ def hook(request):
     return JsonResponse({"result": result})
 
 
+@require_GET
+def push_authorize(request):
+    """What the visitor may hear on ``/_bdh/push``: ``{"patterns": [...]}``.
+
+    The hub asks when a page opens the socket and again now and then, signing
+    the visitor's identity like any proxied request. 404 when the app doesn't
+    use push.
+    """
+    from .. import push
+    from . import app_spec
+
+    if not _internal(request):
+        return JsonResponse({"error": "forbidden"}, status=403)
+    try:
+        patterns = push.patterns_for(request, app_spec().id)
+    except Exception:
+        log.exception("push authorize failed")
+        return JsonResponse({"error": "authorize failed"}, status=500)
+    if patterns is None:
+        return JsonResponse({"error": "push not used"}, status=404)
+    return JsonResponse({"patterns": patterns})
+
+
 def _url(name):
     try:
         return reverse(name)
