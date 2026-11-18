@@ -391,6 +391,43 @@ events.publish("cameras/doorbell/front", {"camera": "front"})  # your own events
 - Tests: `events.flush()` waits for pending handlers and `events.reset()`
   drops all subscriptions.
 
+## Live page updates (push)
+
+A container app's pages can hear about its own events without polling. The
+hub serves a websocket at `/_bdh/push` on the app's origin and, whenever the
+app publishes a topic the visitor may hear, tells the page *which topic*
+changed (never the data). The page refetches through its usual endpoints, so
+those keep enforcing access.
+
+Push is off until the app says who may listen; patterns outside
+`<app id>/#` are dropped:
+
+```python
+from bdh_sdk import events, is_admin, push
+
+@push.authorize
+def who_hears(request):  # request.user is the visitor
+    return ["cameras/#"] if is_admin(request) else []
+
+events.publish("cameras/protect/site1/changed")
+```
+
+The hub asks again every few minutes and closes the socket if the answer
+shrinks to nothing. In the page:
+
+```html
+<script src="{% static 'bdh/push.js' %}"></script>
+<script>
+BDHPush.live({topics: ["cameras/#"], refresh: loadEvents});  // refresh may return a Promise
+</script>
+```
+
+`live` keeps a 30 s poll until the socket has been healthy for a minute, then
+polls every 5 minutes as a fallback. Invalidations are debounced (250 ms) and
+refreshes never overlap. If the hub has no push (`/_bdh/push/info` 404s) or
+refuses the visitor, the page just polls and asks again every 10 minutes.
+Publish at most a few times a second per topic; coalesce bursts in the app.
+
 ## Shares
 
 `bdh_sdk.shares` lets one app publish files that other apps read, e.g. an

@@ -79,6 +79,21 @@ events.flush()
 out["got"] = got
 r = c.get("/demo/", headers=identity.signed_headers(TOKEN, "GET", "/_bdh/hook"))
 out["wrong_path_sig"] = r.status_code
+from bdh_sdk import is_admin, push
+
+
+def internal_get(path, ident=None):
+    return c.get(path, headers=identity.signed_headers(TOKEN, "GET", path, ident, body=b""))
+
+
+out["push_off"] = internal_get("/_bdh/push/authorize").status_code
+push.authorize(lambda request: ["demo/#", "other/#", "demo/x/+"] if is_admin(request) else [])
+admin = {"u": "sam", "staff": True, "mode": "owner"}
+out["push_admin"] = internal_get("/_bdh/push/authorize", admin).json()
+out["push_anon"] = internal_get("/_bdh/push/authorize").json()
+out["push_unsigned"] = c.get("/_bdh/push/authorize").status_code
+# Signed like a page request (no body hash): a visitor can't ask for themselves.
+out["push_proxied"] = get("/_bdh/push/authorize", admin).status_code
 print("RESULT" + json.dumps(out))
 '''
 
@@ -122,6 +137,11 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(out["event"], {"ok": True})
         self.assertEqual(out["got"], ["demo/ping"])
         self.assertEqual(out["wrong_path_sig"], 403)
+        self.assertEqual(out["push_off"], 404)
+        self.assertEqual(out["push_admin"], {"patterns": ["demo/#", "demo/x/+"]})
+        self.assertEqual(out["push_anon"], {"patterns": []})
+        self.assertEqual(out["push_unsigned"], 403)
+        self.assertEqual(out["push_proxied"], 403)
 
 
 if __name__ == "__main__":

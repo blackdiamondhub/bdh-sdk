@@ -10,6 +10,7 @@ urlpatterns = [
     path("_bdh/hook", views.hook, name="bdh_hook"),
     path("_bdh/events", views.events, name="bdh_events"),
     path("_bdh/manifest", views.manifest, name="bdh_manifest"),
+    path("_bdh/push/authorize", views.push_authorize, name="bdh_push_authorize"),
     path("hub_settings/app/<str:app_id>/", views.hub_settings_app, name="hub_settings_app"),
     path("hub/api/tts/", views.tts, name="hub_tts"),
     re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
