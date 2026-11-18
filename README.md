@@ -655,6 +655,24 @@ The first time a `pyproject.toml` version lands on main, the workflow tags
 5. publishes a GitHub release with the wheel, sdist, `bdh-lock.txt` and
    `bdh-app.json`.
 
+### Beta releases
+
+A PEP 440 pre-release version (`2.3.0a1`, `2.3.0b1`, `2.3.0rc1`) is a beta:
+the workflow publishes it as a GitHub **pre-release**, and the catalog lists
+it with `"channel": "beta"`. Only hubs with `channel = "beta"` in their
+`site.toml` (Mercer Island) see it; stable hubs ignore it. Write the version in
+normalized PEP 440 form (`2.3.0b1`, not `2.3.0-beta1`); the workflow rejects
+anything else.
+
+Release flow for a change worth trying first:
+
+1. release `X.Y.ZbN` (bump `pyproject.toml` and merge). The catalog builder
+   adds it as a beta and beta hubs auto-update to it;
+2. iterate with `X.Y.Zb(N+1)` if needed;
+3. promote the beta that proved itself with the catalog's `promote.yml`
+   workflow (inputs: app id, version). It opens a catalog PR that flips the
+   entry's channel to `stable`, keeping the same image (no rebuild).
+
 App repos build no images and need no secrets. The platform builder in
 [bdh-app-catalog](https://github.com/blackdiamondlodge/bdh-app-catalog)
 turns the release into `ghcr.io/blackdiamondlodge/bdh-app-<id>` and opens the
