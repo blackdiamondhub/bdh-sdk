@@ -316,7 +316,7 @@ jobs:
     # rest of the stack pinned by the hub's tests/e2e/stack.lock.json.
     needs: image
     if: ${{ inputs.stack_e2e && inputs.image }}
-    uses: blackdiamondlodge/BlackDiamondHub/.github/workflows/stack-e2e.yml@aa988d7a89c323967b4c701941c6be1327a0f376
+    uses: blackdiamondlodge/BlackDiamondHub/.github/workflows/stack-e2e.yml@5ec2a490d90b722d83b498ccaf9cc776ba1f973f
     with:
       app_artifact: stack-e2e-app
       sdk_ref: ${{ inputs.sdk_ref }}
