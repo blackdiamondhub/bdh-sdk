@@ -125,5 +125,31 @@ class ContextTests(unittest.TestCase):
             bdh_build.assemble(self.art, self.out)
 
 
+_rv_spec = importlib.util.spec_from_file_location(
+    "release_version", ROOT / "builder" / "release_version.py")
+release_version = importlib.util.module_from_spec(_rv_spec)
+_rv_spec.loader.exec_module(release_version)
+
+
+class ReleaseVersionTests(unittest.TestCase):
+    def test_stable(self):
+        self.assertEqual(release_version.release_info("2.3.0"),
+                         {"version": "2.3.0", "tag": "v2.3.0", "prerelease": False})
+
+    def test_pre_releases_are_betas(self):
+        for version in ("2.3.0a1", "2.3.0b1", "2.3.0rc2"):
+            info = release_version.release_info(version)
+            self.assertTrue(info["prerelease"], version)
+            self.assertEqual(info["tag"], f"v{version}")
+
+    def test_post_release_is_stable(self):
+        self.assertFalse(release_version.release_info("2.3.0.post1")["prerelease"])
+
+    def test_rejects_unnormalized_invalid_dev_and_local(self):
+        for version in ("2.3.0-beta1", "2.3.0B1", "nope", "2.3.0.dev1", "2.3.0+x"):
+            with self.assertRaises(SystemExit, msg=version):
+                release_version.release_info(version)
+
+
 if __name__ == "__main__":
     unittest.main()

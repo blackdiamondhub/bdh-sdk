@@ -22,6 +22,11 @@ GitHub release containing:
 | `bdh-app.json` | `[tool.bdh]` build config plus the manifest the image reports (`/opt/bdh/app.json`) |
 | `bdh-extra.Dockerfile` | `custom_base` apps only |
 
+A PEP 440 pre-release version (`X.Y.ZaN`, `bN`, `rcN`; see
+`release_version.py`) is published as a GitHub pre-release, and the catalog
+builder lists it in the `beta` channel. See *Beta releases* in the main
+README.
+
 Each asset's build provenance is attested. Before publishing, the workflow
 builds the image and smoke-tests it (`app_artifacts.sh`). `app-ci.yml` does
 the same on every PR (job `image`).

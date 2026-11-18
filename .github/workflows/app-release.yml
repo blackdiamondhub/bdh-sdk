@@ -91,11 +91,15 @@ jobs:
       - name: Read version
         id: version
         run: |
+          set -euo pipefail
+          python -m pip install --quiet packaging
           read -r name version < <(python -c "import tomllib; p=tomllib.load(open('pyproject.toml','rb'))['project']; print(p['name'], p['version'])")
-          tag="v${version}"
+          # PEP 440 pre-releases (2.3.0b1, 2.3.0rc1, 2.3.0a1) are betas: they are
+          # published as GitHub pre-releases and land in the catalog's beta channel.
+          info=$(python .bdh-sdk/builder/release_version.py "$version")
+          tag=$(sed -n 's/^tag=//p' <<<"$info")
           echo "name=${name}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "$info" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "Tag ${tag} already exists; nothing to release."
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -145,6 +149,7 @@ jobs:
           NAME: ${{ steps.version.outputs.name }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -169,7 +174,9 @@ jobs:
 
           assets=(release/*.whl release/*.tar.gz release/bdh-app.json release/bdh-lock.txt)
           [ ! -f release/bdh-extra.Dockerfile ] || assets+=(release/bdh-extra.Dockerfile)
-          gh release create "$TAG" "${assets[@]}" \
+          flags=()
+          [ "$PRERELEASE" != "true" ] || flags+=(--prerelease)
+          gh release create "$TAG" "${assets[@]}" "${flags[@]}" \
             --title "${NAME} ${VERSION}" \
             --notes-file release-notes.md \
             --verify-tag
