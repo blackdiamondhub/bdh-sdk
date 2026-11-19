@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from bdh_sdk import STATS, Background, PluginSpec, SeasonHint, Stat
 
@@ -24,6 +24,13 @@ class ProvidesTests(unittest.TestCase):
         SeasonHint("winter", "Lifts are open")
         with self.assertRaises(ValueError):
             SeasonHint("summer", "Warm")
+
+    def test_season_opens_on_must_be_a_date(self):
+        self.assertEqual(SeasonHint("winter", "Opening day", date(2026, 11, 26)).opens_on,
+                         date(2026, 11, 26))
+        for bad in ("2026-11-26", datetime(2026, 11, 26, tzinfo=timezone.utc)):
+            with self.assertRaises(ValueError):
+                SeasonHint("winter", "Opening day", bad)
 
     def test_spec_provides_and_stat_keys(self):
         spec = PluginSpec(id="weather", app="weather",

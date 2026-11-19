@@ -218,7 +218,10 @@ def season_value(result):
         return None
     if not isinstance(result, SeasonHint):
         raise TypeError(f"season provider returned {type(result).__name__}")
-    return {"season": result.season, "reason": result.reason}
+    value = {"season": result.season, "reason": result.reason}
+    if result.opens_on is not None:
+        value["opens_on"] = result.opens_on.isoformat()
+    return value
 
 
 def _message(result):

@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest import mock
 
 from bdh_sdk import hooks
@@ -133,6 +133,8 @@ class RunTests(unittest.TestCase):
         self.assertEqual([b["id"] for b in hooks.run(s, "provide", capability=BACKGROUNDS)], ["a"])
         self.assertEqual(hooks.run(s, "provide", capability=SEASON),
                          {"season": "winter", "reason": "snow"})
+        self.assertEqual(hooks.season_value(SeasonHint("winter", "Opening day", date(2026, 11, 26))),
+                         {"season": "winter", "reason": "Opening day", "opens_on": "2026-11-26"})
 
     def test_setting_options(self):
         s = spec(settings=(Setting("units", "Units", CHOICE, choices=(("m", "Metric"), "imperial")),))
