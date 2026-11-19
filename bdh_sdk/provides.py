@@ -7,14 +7,15 @@ a provider should return quickly from its own cache.
 
 - ``stats``: iterable of :class:`Stat` (screensaver info strip)
 - ``backgrounds``: iterable of :class:`Background` (screensaver live cam)
-- ``season``: :class:`SeasonHint` or None (screensaver season)
+- ``season``: :class:`SeasonHint` or None (screensaver season and
+  opening-day countdown)
 
 Stats are listed on the settings page from ``PluginSpec.stat_keys`` without
 calling the provider; a provider only returns stats whose key it declared.
 Consumers refer to them as ``"<plugin id>.<key>"``.
 """
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 STATS = "stats"
 BACKGROUNDS = "backgrounds"
@@ -67,16 +68,27 @@ class Background:
 
 @dataclass(frozen=True)
 class SeasonHint:
-    """Evidence that a season has started early, e.g. the lifts are open.
+    """Evidence about when a season starts.
 
-    Only ``"winter"`` is supported for now, and a hint can only bring the
-    season forward (within the screen's early window), never delay it.
-    ``reason`` is shown on the settings page.
+    Without ``opens_on`` the hint means the season has started, e.g. the
+    lifts are open; it can only bring the season forward (within the
+    screen's early window), never delay it.
+
+    With ``opens_on`` it is a schedule, e.g. the resort's published opening
+    day: the season counts as started only from that date, and the screen
+    counts down to it instead of its configured start date.
+
+    Only ``"winter"`` is supported for now. ``reason`` is shown on the
+    settings page.
     """
 
     season: str
     reason: str
+    opens_on: date | None = None
 
     def __post_init__(self):
         if self.season != WINTER:
             raise ValueError(f"unsupported season {self.season!r}")
+        if self.opens_on is not None and (
+                isinstance(self.opens_on, datetime) or not isinstance(self.opens_on, date)):
+            raise ValueError("opens_on must be a date")

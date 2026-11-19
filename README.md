@@ -95,7 +95,7 @@ def stats():
 |---|---|---|
 | `STATS` (`"stats"`) | iterable of `Stat` | screensaver info strip |
 | `BACKGROUNDS` (`"backgrounds"`) | iterable of `Background` | screensaver live cam |
-| `SEASON` (`"season"`) | `SeasonHint` or None | bringing winter forward (e.g. lifts open) |
+| `SEASON` (`"season"`) | `SeasonHint` or None | bringing winter forward (e.g. lifts open), or its opening day |
 
 - `Stat` has exactly one of `value` (formatted, with units) or `time`
   (timezone-aware). Declare every key in `stat_keys`: the settings page
@@ -104,7 +104,10 @@ def stats():
   `weather.sunrise`.
 - `Background(id, label, image_url, refresh_seconds=60)`: the screen
   reloads the URL every `refresh_seconds`, so a stable URL is fine.
-- `SeasonHint("winter", reason)` can only bring winter forward.
+- `SeasonHint("winter", reason)` means winter has started and can only
+  bring it forward. `SeasonHint("winter", reason, opens_on=date)` is a
+  schedule (e.g. the resort's published opening day): winter starts on
+  that date and the screen counts down to it instead of its own setting.
 
 The hub calls providers in worker threads with a short deadline and keeps
 the last good result, so a slow upstream never stalls a screen.
