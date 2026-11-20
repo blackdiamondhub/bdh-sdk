@@ -1,10 +1,10 @@
 import unittest
 from datetime import date, datetime, timezone
+from importlib.util import find_spec
 
 from bdh_sdk import (
     LIVE, PHOTOS, SAVER, STATS, Background, PluginSpec, SaverImage, SaverSource, SeasonHint, Stat,
 )
-from bdh_sdk.runtime.views import describe
 
 
 class ProvidesTests(unittest.TestCase):
@@ -70,15 +70,22 @@ class ProvidesTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 SaverImage("cams", **bad)
 
+    @unittest.skipIf(find_spec("django") is None, "needs the runtime extra")
+    def test_describe_emits_saver_sources(self):
+        from bdh_sdk.runtime.views import describe
+        cams = SaverSource("cams", "Mountain cams", "Live webcams", LIVE)
+        spec = PluginSpec(id="webcams", app="webcams", provides={SAVER: "w.saver"},
+                          saver_sources=[cams])
+        self.assertEqual(describe(spec)["saver_sources"], [
+            {"key": "cams", "title": "Mountain cams", "description": "Live webcams", "kind": "live"}])
+        self.assertEqual(describe(PluginSpec(id="x", app="x"))["saver_sources"], [])
+
     def test_spec_saver_sources(self):
         cams = SaverSource("cams", "Mountain cams", "Live webcams", LIVE)
         spec = PluginSpec(id="webcams", app="webcams", provides={SAVER: "w.saver"},
                           saver_sources=[cams])
         self.assertEqual(spec.saver_sources, (cams,))
         hash(spec)
-        self.assertEqual(describe(spec)["saver_sources"], [
-            {"key": "cams", "title": "Mountain cams", "description": "Live webcams", "kind": "live"}])
-        self.assertEqual(describe(PluginSpec(id="x", app="x"))["saver_sources"], [])
         for bad in (dict(saver_sources=[cams, SaverSource("cams", "Other")]),
                     dict(saver_sources=[SaverSource(f"s{i}", "S") for i in range(9)]),
                     dict(saver_sources=[{"key": "cams", "title": "T"}]),
