@@ -119,32 +119,40 @@ class HAInstanceTests(unittest.TestCase):
 class HARegistryTests(unittest.TestCase):
     ENTITIES = [
         {"entity_id": "climate.fp", "device_id": "d1", "platform": "napoleon", "translation_key": "t",
-         "disabled_by": None, "name": None, "original_name": "Fireplace", "unique_id": "u1"},
-        {"entity_id": "light.k", "device_id": "d2", "platform": "hue", "disabled_by": None},
+         "disabled_by": None, "name": None, "original_name": "Fireplace", "unique_id": "u1",
+         "area_id": None, "hidden_by": None, "entity_category": None},
+        {"entity_id": "light.k", "device_id": "d2", "platform": "hue", "disabled_by": None,
+         "area_id": "kitchen"},
     ]
     DEVICES = [{"id": "d1", "name": "FP", "name_by_user": None, "manufacturer": "Napoleon",
-                "model": "X", "serial_number": "s"},
-               {"id": "d2", "name": "Bulb"}, {"id": "d3", "name": "Unused"}]
+                "model": "X", "serial_number": "s", "area_id": "living", "disabled_by": None},
+               {"id": "d2", "name": "Bulb"}, {"id": "d3", "name": "Unused", "area_id": "garage"}]
+    AREAS = [{"area_id": "living", "name": "Living Room", "picture": None},
+             {"area_id": "kitchen", "name": "Kitchen"}, {"area_id": "garage", "name": "Garage"}]
     CONFIG = {"unit_system": {"temperature": "°F", "length": "mi"}, "location_name": "Home"}
 
     @mock.patch("bdh_sdk.ha.ws_commands")
     def test_trims_and_filters_by_platform(self, ws):
-        ws.return_value = [self.ENTITIES, self.DEVICES, self.CONFIG]
+        ws.return_value = [self.ENTITIES, self.DEVICES, self.AREAS, self.CONFIG]
         reg = ha.get_registry(platform="napoleon", instance="bdl")
         self.assertEqual(ws.call_args.kwargs, {"instance": "bdl"})
         self.assertEqual(reg["entities"], [
-            {"entity_id": "climate.fp", "device_id": "d1", "platform": "napoleon",
-             "translation_key": "t", "disabled_by": None, "name": None, "original_name": "Fireplace"}])
+            {"entity_id": "climate.fp", "device_id": "d1", "area_id": None, "platform": "napoleon",
+             "translation_key": "t", "disabled_by": None, "hidden_by": None, "entity_category": None,
+             "name": None, "original_name": "Fireplace"}])
         self.assertEqual(reg["devices"], [{"id": "d1", "name": "FP", "name_by_user": None,
-                                           "manufacturer": "Napoleon", "model": "X"}])
+                                           "manufacturer": "Napoleon", "model": "X",
+                                           "area_id": "living", "disabled_by": None}])
+        self.assertEqual(reg["areas"], [{"area_id": "living", "name": "Living Room"}])
         self.assertEqual(reg["unit_system"], {"temperature": "°F", "length": "mi"})
 
     @mock.patch("bdh_sdk.ha.ws_commands")
     def test_without_platform_keeps_all_referenced_devices(self, ws):
-        ws.return_value = [self.ENTITIES, self.DEVICES, None]
+        ws.return_value = [self.ENTITIES, self.DEVICES, self.AREAS, None]
         reg = ha.get_registry()
         self.assertEqual([e["entity_id"] for e in reg["entities"]], ["climate.fp", "light.k"])
         self.assertEqual([d["id"] for d in reg["devices"]], ["d1", "d2"])
+        self.assertEqual([a["area_id"] for a in reg["areas"]], ["living", "kitchen"])
         self.assertEqual(reg["unit_system"], {})
 
 
