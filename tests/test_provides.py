@@ -1,7 +1,10 @@
 import unittest
 from datetime import date, datetime, timezone
 
-from bdh_sdk import STATS, Background, PluginSpec, SeasonHint, Stat
+from bdh_sdk import (
+    LIVE, PHOTOS, SAVER, STATS, Background, PluginSpec, SaverImage, SaverSource, SeasonHint, Stat,
+)
+from bdh_sdk.runtime.views import describe
 
 
 class ProvidesTests(unittest.TestCase):
@@ -43,6 +46,46 @@ class ProvidesTests(unittest.TestCase):
             PluginSpec(id="x", app="x", stat_keys=(("a", "A"), ("a", "B")))
         with self.assertRaises(ValueError):
             PluginSpec(id="x", app="x", stat_keys=(("a", ""),))
+
+    def test_saver_source_validation(self):
+        SaverSource("cams", "Mountain cams", "Live webcams from around Sun Peaks", LIVE)
+        SaverSource("family-album_2", "Family album", kind=PHOTOS)
+        for bad in (dict(key="Cams", title="T"), dict(key="-x", title="T"),
+                    dict(key="a b", title="T"), dict(key="", title="T"),
+                    dict(key="x", title=" "), dict(key="x", title="T" * 33),
+                    dict(key="x", title="T", description="d" * 81),
+                    dict(key="x", title="T", kind="video")):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                SaverSource(**bad)
+
+    def test_saver_image_validation(self):
+        SaverImage("cams", "village", "/webcams/cam/village.jpg", refresh_seconds=60)
+        for bad in (dict(id="", image_url="/a.jpg"),
+                    dict(id="a", image_url="https://evil.example/a.jpg"),
+                    dict(id="a", image_url="//evil.example/a.jpg"),
+                    dict(id="a", image_url="a.jpg"),
+                    dict(id="a", image_url="/a.jpg", refresh_seconds=0),
+                    dict(id="a", image_url="/a.jpg", refresh_seconds=True),
+                    dict(id="a", image_url="/a.jpg", refresh_seconds=1.5)):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                SaverImage("cams", **bad)
+
+    def test_spec_saver_sources(self):
+        cams = SaverSource("cams", "Mountain cams", "Live webcams", LIVE)
+        spec = PluginSpec(id="webcams", app="webcams", provides={SAVER: "w.saver"},
+                          saver_sources=[cams])
+        self.assertEqual(spec.saver_sources, (cams,))
+        hash(spec)
+        self.assertEqual(describe(spec)["saver_sources"], [
+            {"key": "cams", "title": "Mountain cams", "description": "Live webcams", "kind": "live"}])
+        self.assertEqual(describe(PluginSpec(id="x", app="x"))["saver_sources"], [])
+        for bad in (dict(saver_sources=[cams, SaverSource("cams", "Other")]),
+                    dict(saver_sources=[SaverSource(f"s{i}", "S") for i in range(9)]),
+                    dict(saver_sources=[{"key": "cams", "title": "T"}]),
+                    dict(saver_sources="cams"),
+                    dict(provides={SAVER: "w.saver"})):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                PluginSpec(id="x", app="x", **bad)
 
 
 if __name__ == "__main__":
