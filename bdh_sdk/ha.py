@@ -358,20 +358,24 @@ def ws_commands(*messages, instance=None):
         ws.close()
 
 
-_ENTITY_FIELDS = ("entity_id", "device_id", "platform", "translation_key", "disabled_by",
-                  "name", "original_name")
-_DEVICE_FIELDS = ("id", "name", "name_by_user", "manufacturer", "model")
+_ENTITY_FIELDS = ("entity_id", "device_id", "area_id", "platform", "translation_key",
+                  "disabled_by", "hidden_by", "entity_category", "name", "original_name")
+_DEVICE_FIELDS = ("id", "name", "name_by_user", "manufacturer", "model", "area_id", "disabled_by")
 
 
 def get_registry(platform=None, instance=None):
-    """The entity and device registries, trimmed to what apps need.
+    """The entity, device and area registries, trimmed to what apps need.
 
-    Returns ``{"entities": [...], "devices": [...], "unit_system": {...}}``.
-    Entities carry ``entity_id``, ``device_id``, ``platform``,
-    ``translation_key``, ``disabled_by``, ``name`` and ``original_name``;
+    Returns ``{"entities": [...], "devices": [...], "areas": [...],
+    "unit_system": {...}}``. Entities carry ``entity_id``, ``device_id``,
+    ``area_id``, ``platform``, ``translation_key``, ``disabled_by``,
+    ``hidden_by``, ``entity_category``, ``name`` and ``original_name``;
     ``platform`` keeps only that integration's entities. Devices are the ones
     those entities belong to, with ``id``, ``name``, ``name_by_user``,
-    ``manufacturer`` and ``model``. ``unit_system`` comes from HA's config.
+    ``manufacturer``, ``model``, ``area_id`` and ``disabled_by``. Areas are
+    ``{"area_id", "name"}`` for the areas those entities or devices are in.
+    ``unit_system`` comes from HA's config. Hubs older than SDK 0.38 send no
+    ``areas`` (and none of the newer fields), so read them with ``.get``.
 
     In a container the broker answers this (op ``ha.registry``) and returns
     only the entities the app's ``ha.read`` grants cover. Raises HAError on
@@ -379,9 +383,10 @@ def get_registry(platform=None, instance=None):
     """
     if _backend is not None:
         return _backend.get_registry(platform=platform, **_kw(instance))
-    entities, devices, config = ws_commands(
+    entities, devices, areas, config = ws_commands(
         {"type": "config/entity_registry/list"},
         {"type": "config/device_registry/list"},
+        {"type": "config/area_registry/list"},
         {"type": "get_config"},
         instance=instance,
     )
@@ -392,5 +397,8 @@ def get_registry(platform=None, instance=None):
     ]
     device_ids = {e["device_id"] for e in ents if e["device_id"]}
     devs = [{k: d.get(k) for k in _DEVICE_FIELDS} for d in devices or () if d.get("id") in device_ids]
-    return {"entities": ents, "devices": devs,
+    area_ids = {x["area_id"] for x in (*ents, *devs) if x["area_id"]}
+    ars = [{"area_id": a.get("area_id"), "name": a.get("name")}
+           for a in areas or () if a.get("area_id") in area_ids]
+    return {"entities": ents, "devices": devs, "areas": ars,
             "unit_system": dict((config or {}).get("unit_system") or {})}

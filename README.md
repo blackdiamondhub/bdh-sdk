@@ -515,11 +515,13 @@ for inst in ha.instances():                          # [{"id": "mi", ...}, ...]
 ```
 
 `get_registry(platform=None)` returns the entity and device registries trimmed
-to what apps need: `{"entities": [...], "devices": [...], "unit_system": {...}}`.
-Entities have `entity_id`, `device_id`, `platform`, `translation_key`,
-`disabled_by`, `name` and `original_name`; `platform="napoleon"` keeps just that
-integration's. Devices are only those the entities belong to (`id`, `name`,
-`name_by_user`, `manufacturer`, `model`). In a container the broker answers it
+to what apps need: `{"entities": [...], "devices": [...], "areas": [...], "unit_system": {...}}`.
+Entities have `entity_id`, `device_id`, `area_id`, `platform`, `translation_key`,
+`disabled_by`, `hidden_by`, `entity_category`, `name` and `original_name`;
+`platform="napoleon"` keeps just that integration's. Devices are only those the
+entities belong to (`id`, `name`, `name_by_user`, `manufacturer`, `model`,
+`area_id`, `disabled_by`), and areas only those an entity or device is in
+(`area_id`, `name`). Older hubs may leave out `areas`. In a container the broker answers it
 (op `ha.registry`, needs any `ha.read` grant) with only the entities the app may
 read, so apps don't need the admin-only `ha.ws` grant that `ws_commands` does.
 
@@ -604,7 +606,14 @@ default, 6 hours). Apps that must update sooner should use `always`.
 
 `bdh_sdk.testing.FakeBroker` is an in-process broker for app tests: register
 handlers with `.on(op, fn)` and check `.calls`. It answers `ha.registry` from
-`.registry` and runs `shares.*` in memory.
+`.registry` (or `.registries[instance]`) and runs `shares.*` in memory.
+
+Use `FakeBroker.for_plugin(PLUGIN)` so the broker enforces the same rules as the
+hub for the app's manifest `permissions` (`bdh_sdk.grants`): an op the manifest
+doesn't grant (e.g. `ha.ws_commands` without `ha.ws`) fails with
+`PermissionDenied`, the registry and states are cut to readable entities, and
+an unknown `instance` is `invalid`. List instances in `.instances` and set
+states per instance in `.ha_states`.
 
 `python -m bdh_sdk.runtime.manage <command>` runs Django management commands
 in the container (without starting the app's server or background workers).

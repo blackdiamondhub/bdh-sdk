@@ -341,6 +341,72 @@ class InstalledSubscribeTests(unittest.TestCase):
             self.assertTrue(rpc.flush())
 
 
+class ManifestPermissionTests(unittest.TestCase):
+    """FakeBroker.for_plugin refuses what the hub would for the app's manifest."""
+
+    REG = {
+        "entities": [
+            {"entity_id": "camera.door", "device_id": "d1", "area_id": None, "platform": "unifiprotect"},
+            {"entity_id": "binary_sensor.door_motion", "device_id": "d1", "area_id": "porch",
+             "platform": "unifiprotect"},
+            {"entity_id": "lock.front", "device_id": "d2", "area_id": "hall", "platform": "august"},
+        ],
+        "devices": [{"id": "d1", "name": "Door cam", "area_id": "entry"},
+                    {"id": "d2", "name": "Lock", "area_id": "hall"}],
+        "areas": [{"area_id": "porch", "name": "Porch"}, {"area_id": "entry", "name": "Entry"},
+                  {"area_id": "hall", "name": "Hall"}],
+        "unit_system": {},
+    }
+
+    def setUp(self):
+        spec = mock.Mock(id="cams", permissions=("ha.read:camera.*", "ha.read:binary_sensor.*",
+                                                 "events.subscribe:+/state/#"))
+        self.broker = FakeBroker.for_plugin(spec, install=True).start()
+        self.addCleanup(self.broker.stop)
+        self.addCleanup(events.reset)
+        self.broker.instances = [{"id": "ha", "name": "MI", "site": "mi", "default": True},
+                                 {"id": "ha_bdl", "name": "SP", "site": "bdl", "default": False}]
+
+    def test_ws_commands_need_the_admin_grant(self):
+        with self.assertRaises(rpc.PermissionDenied):
+            ha.ws_commands({"type": "config/entity_registry/list"})
+
+    def test_registry_is_cut_to_readable_entities_with_their_devices_and_areas(self):
+        self.broker.registries["ha_bdl"] = self.REG
+        reg = ha.get_registry(instance="ha_bdl")
+        self.assertEqual([e["entity_id"] for e in reg["entities"]],
+                         ["camera.door", "binary_sensor.door_motion"])
+        self.assertEqual([d["id"] for d in reg["devices"]], ["d1"])
+        self.assertEqual(sorted(a["area_id"] for a in reg["areas"]), ["entry", "porch"])
+        self.assertEqual(ha.get_registry()["entities"], [])  # default instance is empty
+
+    def test_unknown_instance_is_invalid(self):
+        with self.assertRaises(rpc.BrokerError) as cm:
+            ha.get_registry(instance="nope")
+        self.assertEqual(cm.exception.code, "invalid")
+
+    def test_states_and_calls_follow_read_and_call_grants(self):
+        self.broker.ha_states["ha"] = [{"entity_id": "camera.door", "state": "idle"},
+                                       {"entity_id": "lock.front", "state": "locked"}]
+        self.assertEqual([s["entity_id"] for s in ha.get_all_states()], ["camera.door"])
+        with self.assertRaises(rpc.PermissionDenied):
+            ha.get_entity_state("lock.front")
+        with self.assertRaises(rpc.PermissionDenied):
+            ha.call_service("lock", "unlock", "lock.front")
+
+    def test_other_apps_state_and_alerts_are_refused(self):
+        client = rpc.Client(self.broker.url, self.broker.token, retries=0)
+        client.call("state.set", {"app": "cams", "key": "k", "value": 1})
+        with self.assertRaises(rpc.PermissionDenied):
+            client.call("state.get", {"app": "timers", "key": "k"})
+        with self.assertRaises(rpc.PermissionDenied):
+            client.call("alerts.push", {"app": "cams", "key": "k"})
+        self.assertEqual(client.call("settings.get", {"app": "hub", "key": "units"})["found"], False)
+        with self.assertRaises(rpc.BrokerError) as cm:
+            client.call("no.such_op", {})
+        self.assertEqual(cm.exception.status, 404)
+
+
 class InstallFromEnvTests(unittest.TestCase):
     def test_install_reads_the_environment(self):
         with FakeBroker(token="env-token") as broker, mock.patch.dict(
