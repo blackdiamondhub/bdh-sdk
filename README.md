@@ -94,7 +94,7 @@ def stats():
 | capability | returns | used for |
 |---|---|---|
 | `STATS` (`"stats"`) | iterable of `Stat` | screensaver info strip |
-| `BACKGROUNDS` (`"backgrounds"`) | iterable of `Background` | screensaver live cam |
+| `SAVER` (`"saver"`) | iterable of `SaverImage` | screen saver pictures for the app's `saver_sources` |
 | `SEASON` (`"season"`) | `SeasonHint` or None | bringing winter forward (e.g. lifts open), or its opening day |
 
 - `Stat` has exactly one of `value` (formatted, with units) or `time`
@@ -102,8 +102,23 @@ def stats():
   lists them without calling the app, and undeclared keys are dropped.
   Other code refers to a stat as `"<plugin id>.<key>"`, e.g.
   `weather.sunrise`.
-- `Background(id, label, image_url, refresh_seconds=60)`: the screen
-  reloads the URL every `refresh_seconds`, so a stable URL is fine.
+- Screen saver sources: declare each in `saver_sources`, e.g.
+  `SaverSource("cams", "Mountain cams", "Live webcams from around Sun Peaks", LIVE)`.
+  The title (at most 32 chars) and description (at most 80) are what the
+  Display settings card shows, without calling the app. Never rename a
+  key: the hub's saved settings refer to `"<plugin id>.<key>"`. At most 8
+  per app.
+  - `LIVE` sources (webcams) show one picture at a time, reloaded every
+    `refresh_seconds` (required; a stable URL is fine). The admin can pick
+    one or rotate through them, and the hub wakes an `on_demand` app.
+  - `PHOTOS` sources crossfade through still pictures with optional
+    captions. The hub does not wake the app for them, so use
+    `lifecycle="always"`.
+  - `SaverImage(source, id, image_url, label="", caption="", refresh_seconds=None)`:
+    `image_url` is a path on the app's origin (absolute URLs are rejected),
+    `label` names it (e.g. the camera). Images for undeclared sources are
+    dropped and the hub keeps 200 per source.
+  - `BACKGROUNDS` / `Background` are deprecated and no longer read by the hub.
 - `SeasonHint("winter", reason)` means winter has started and can only
   bring it forward. `SeasonHint("winter", reason, opens_on=date)` is a
   schedule (e.g. the resort's published opening day): winter starts on

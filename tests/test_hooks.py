@@ -4,7 +4,10 @@ from unittest import mock
 
 from bdh_sdk import hooks
 from bdh_sdk.plugins import CHOICE, Action, PluginSpec, Reading, Setting, Shortcut, Status, StatusRow, Stay
-from bdh_sdk.provides import BACKGROUNDS, SEASON, STATS, Background, SeasonHint, Stat
+from bdh_sdk.provides import (
+    BACKGROUNDS, LIVE, PHOTOS, SAVER, SEASON, STATS, Background, SaverImage, SaverSource, SeasonHint,
+    Stat,
+)
 
 HERE = __name__
 seen = []
@@ -50,6 +53,18 @@ def stats():
 def backgrounds():
     return [Background("a", "A", "/bg/a.jpg"), Background("a", "dup", "/x"),
             Background("b", "B", "")]
+
+
+def saver():
+    return [SaverImage("cams", "village", "/cam/v.jpg", label="Village " * 30, refresh_seconds=60),
+            SaverImage("cams", "village", "/cam/dup.jpg", refresh_seconds=60),
+            SaverImage("cams", "nolive", "/cam/n.jpg"),
+            SaverImage("album", "p1", "/photos/1.jpg", caption="Ski day", refresh_seconds=5),
+            SaverImage("other", "x", "/x.jpg", refresh_seconds=60)]
+
+
+def many_photos():
+    return [SaverImage("album", f"p{i}", f"/p/{i}.jpg") for i in range(250)]
 
 
 def season():
@@ -135,6 +150,22 @@ class RunTests(unittest.TestCase):
                          {"season": "winter", "reason": "snow"})
         self.assertEqual(hooks.season_value(SeasonHint("winter", "Opening day", date(2026, 11, 26))),
                          {"season": "winter", "reason": "Opening day", "opens_on": "2026-11-26"})
+
+    def test_provide_saver(self):
+        sources = (SaverSource("cams", "Mountain cams", kind=LIVE),
+                   SaverSource("album", "Family album", kind=PHOTOS))
+        s = spec(provides={SAVER: f"{HERE}.saver"}, saver_sources=sources)
+        got = hooks.run(s, "provide", capability=SAVER)
+        self.assertEqual(got, [
+            {"source": "cams", "id": "village", "url": "/cam/v.jpg",
+             "label": ("Village " * 30)[:120], "caption": "", "refresh_seconds": 60},
+            {"source": "album", "id": "p1", "url": "/photos/1.jpg", "label": "",
+             "caption": "Ski day"},
+        ])
+        s = spec(provides={SAVER: f"{HERE}.many_photos"}, saver_sources=sources)
+        self.assertEqual(len(hooks.run(s, "provide", capability=SAVER)), 200)
+        with self.assertRaises(TypeError):
+            hooks.saver_value(sources, stats())
 
     def test_setting_options(self):
         s = spec(settings=(Setting("units", "Units", CHOICE, choices=(("m", "Metric"), "imperial")),))

@@ -41,9 +41,12 @@ from .plugins import (
     Tile,
 )
 from .auth import is_admin
-from .provides import BACKGROUNDS, SEASON, STATS, Background, SeasonHint, Stat
+from .provides import (
+    BACKGROUNDS, LIVE, PHOTOS, SAVER, SEASON, STATS, Background, SaverImage, SaverSource, SeasonHint,
+    Stat,
+)
 
-__version__ = "0.38.0"
+__version__ = "0.39.0"
 
 __all__ = [
     "__version__",
@@ -85,8 +88,13 @@ __all__ = [
     "is_admin",
     "STATS",
     "BACKGROUNDS",
+    "LIVE",
+    "PHOTOS",
+    "SAVER",
     "SEASON",
     "Stat",
     "Background",
+    "SaverImage",
+    "SaverSource",
     "SeasonHint",
 ]

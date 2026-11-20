@@ -439,8 +439,11 @@ class PluginSpec:
     ``provides`` maps capability names from :mod:`bdh_sdk.provides` (e.g.
     ``"stats"``) to dotted paths of zero-argument callables, for data other
     parts of the hub can use. ``stat_keys`` lists the ``(key, label)`` of
-    every stat the app may provide. An app needs no tiles or URLs: it can
-    just provide data and settings.
+    every stat the app may provide. ``saver_sources`` lists the
+    :class:`~bdh_sdk.provides.SaverSource` choices the app offers the screen
+    saver (at most 8, unique keys), with pictures from its ``saver``
+    provider. An app needs no tiles or URLs: it can just provide data and
+    settings.
 
     The container manifest: ``permissions`` lists what the app asks the hub
     broker for (see :func:`valid_permission`); the admin grants a subset.
@@ -475,6 +478,7 @@ class PluginSpec:
     settings_pages: tuple[SettingsPage, ...] = field(default_factory=tuple)
     provides: dict[str, str] = field(default_factory=dict, hash=False)
     stat_keys: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    saver_sources: tuple = field(default_factory=tuple)
     api_version: int = API_VERSION
     permissions: tuple[str, ...] = field(default_factory=tuple)
     network: str = NETWORK_OUTBOUND
@@ -492,6 +496,7 @@ class PluginSpec:
             raise ValueError(f"plugin {self.id!r} has duplicate stat_keys")
         if any(not key or not label for key, label in self.stat_keys):
             raise ValueError(f"plugin {self.id!r} stat_keys need a key and a label")
+        self._check_saver_sources()
         for perm in self.permissions:
             if not valid_permission(perm):
                 raise ValueError(f"plugin {self.id!r} has invalid permission {perm!r}")
@@ -511,6 +516,22 @@ class PluginSpec:
             raise ValueError(
                 f"plugin {self.id!r} wake_every must be 0 or {MIN_WAKE_EVERY}..{MAX_WAKE_EVERY} seconds"
             )
+
+    def _check_saver_sources(self):
+        from .provides import MAX_SAVER_SOURCES, SAVER, SaverSource
+
+        if isinstance(self.saver_sources, (str, bytes, dict)):
+            raise ValueError(f"plugin {self.id!r} saver_sources must be a list")
+        sources = tuple(self.saver_sources)
+        if not all(isinstance(src, SaverSource) for src in sources):
+            raise ValueError(f"plugin {self.id!r} saver_sources must be SaverSource objects")
+        if len(sources) > MAX_SAVER_SOURCES:
+            raise ValueError(f"plugin {self.id!r} has more than {MAX_SAVER_SOURCES} saver_sources")
+        if len({src.key for src in sources}) != len(sources):
+            raise ValueError(f"plugin {self.id!r} has duplicate saver_sources keys")
+        if SAVER in self.provides and not sources:
+            raise ValueError(f"plugin {self.id!r} provides saver images but declares no saver_sources")
+        object.__setattr__(self, "saver_sources", sources)
 
     def _check_shares(self):
         if isinstance(self.shares, (str, bytes, dict)) or isinstance(self.reads, (str, bytes)):

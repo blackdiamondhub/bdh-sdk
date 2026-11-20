@@ -16,7 +16,10 @@ from datetime import timezone
 from importlib import import_module
 
 from .plugins import STATUS_LEVELS, INFO, Action, Card, Reading, Shortcut, Status, StatusRow, Stay
-from .provides import BACKGROUNDS, SEASON, STATS, Background, SeasonHint, Stat
+from .provides import (
+    BACKGROUNDS, LIVE, MAX_SAVER_IMAGES, SAVER, SAVER_TEXT_MAX, SEASON, STATS, Background,
+    SaverImage, SeasonHint, Stat,
+)
 
 __all__ = ["HOOKS", "HookNotFound", "run"]
 
@@ -213,6 +216,34 @@ def backgrounds_value(result):
     return out
 
 
+def saver_value(sources, result):
+    """Validated pictures for the declared ``sources`` (:class:`SaverSource`)."""
+    kinds = {src.key: src.kind for src in sources}
+    out, seen, counts = [], set(), {}
+    for img in list(result or ()):
+        if not isinstance(img, SaverImage):
+            raise TypeError(f"saver provider returned {type(img).__name__}")
+        kind = kinds.get(img.source)
+        if kind is None:
+            log.warning("Skipping saver image for undeclared source %r", img.source)
+            continue
+        if kind == LIVE and img.refresh_seconds is None:
+            log.warning("Skipping live saver image %r without refresh_seconds", img.id)
+            continue
+        if (img.source, img.id) in seen or len(img.id) > SAVER_TEXT_MAX:
+            continue
+        if counts.get(img.source, 0) >= MAX_SAVER_IMAGES:
+            continue
+        seen.add((img.source, img.id))
+        counts[img.source] = counts.get(img.source, 0) + 1
+        item = {"source": img.source, "id": img.id, "url": img.image_url,
+                "label": img.label[:SAVER_TEXT_MAX], "caption": img.caption[:SAVER_TEXT_MAX]}
+        if kind == LIVE:
+            item["refresh_seconds"] = img.refresh_seconds
+        out.append(item)
+    return out
+
+
 def season_value(result):
     if result is None:
         return None
@@ -269,6 +300,8 @@ def run(spec, hook, *, mode=None, shortcut_id=None, row_id="", action_id=None,
             return backgrounds_value(result)
         if capability == SEASON:
             return season_value(result)
+        if capability == SAVER:
+            return saver_value(spec.saver_sources, result)
         raise HookNotFound(f"provide:{capability}")
     if hook == "setting_options":
         setting = next((s for s in spec.settings if s.key == key), None)

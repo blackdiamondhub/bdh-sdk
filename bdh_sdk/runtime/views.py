@@ -108,6 +108,10 @@ def describe(spec):
             for p in spec.settings_pages
         ],
         "stat_keys": [list(k) for k in spec.stat_keys],
+        "saver_sources": [
+            {"key": s.key, "title": s.title, "description": s.description, "kind": s.kind}
+            for s in spec.saver_sources
+        ],
     }
 
 
