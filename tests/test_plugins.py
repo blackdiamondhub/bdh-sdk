@@ -124,6 +124,8 @@ class ManifestTests(unittest.TestCase):
             {"memory_mb": 8},
             {"memory_mb": "96"},
             {"companions": ("redis",)},
+            {"companions": ("go2rtc", "aec")},
+            {"companions": ("aec",), "network": "lan"},
             {"wake_every": 60},
             {"wake_every": 30 * 24 * 3600},
             {"wake_every": "3600"},
@@ -133,6 +135,10 @@ class ManifestTests(unittest.TestCase):
             with self.subTest(**{k: str(v) for k, v in kwargs.items()}):
                 with self.assertRaises(ValueError):
                     PluginSpec(id="a", app="a", **kwargs)
+
+    def test_aec_companion(self):
+        spec = PluginSpec(id="a", app="a", network="lan", companions=("go2rtc", "aec"))
+        self.assertEqual(spec.manifest()["companions"], ["go2rtc", "aec"])
 
     def test_shares_and_reads(self):
         self.assertEqual(PluginSpec(id="a", app="a").manifest()["shares"], [])
