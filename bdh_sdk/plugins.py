@@ -44,7 +44,7 @@ MIN_MEMORY_MB = 48
 MAX_MEMORY_MB = 256
 
 # Helper containers the platform knows how to run next to an app.
-COMPANIONS = frozenset({"go2rtc"})
+COMPANIONS = frozenset({"go2rtc", "aec"})
 
 # Permissions an app can request; the admin approves a subset.
 #   ha.read:<entity glob>        read states/history, e.g. ha.read:sensor.*
@@ -449,7 +449,9 @@ class PluginSpec:
     broker for (see :func:`valid_permission`); the admin grants a subset.
     ``network`` is one of :data:`NETWORKS`, ``lifecycle`` one of
     :data:`LIFECYCLES`, ``memory_mb`` the container memory limit and
-    ``companions`` names platform helper containers (e.g. ``"go2rtc"``).
+    ``companions`` names platform helper containers: ``"go2rtc"`` (its API
+    URL arrives as ``BDH_GO2RTC_URL``) and ``"aec"`` (doorbell echo
+    cancellation, ``BDH_AEC_URL``; needs ``network="lan"`` and ``"go2rtc"``).
     ``wake_every`` (seconds, 0 = hub default) is how old an ``on_demand``
     app's cached status/stats may get before the hub wakes it to refresh
     them; while it sleeps the hub shows the last answer.
@@ -511,6 +513,8 @@ class PluginSpec:
         for name in self.companions:
             if name not in COMPANIONS:
                 raise ValueError(f"plugin {self.id!r} has unknown companion {name!r}")
+        if "aec" in self.companions and (self.network != NETWORK_LAN or "go2rtc" not in self.companions):
+            raise ValueError(f"plugin {self.id!r} companion 'aec' needs network 'lan' and 'go2rtc'")
         if (not isinstance(self.wake_every, int) or isinstance(self.wake_every, bool)
                 or not (self.wake_every == 0 or MIN_WAKE_EVERY <= self.wake_every <= MAX_WAKE_EVERY)):
             raise ValueError(
