@@ -13,6 +13,10 @@ text-to-speech, see :func:`bdh_sdk.speakers.tts_audio`). Repeats with the
 same ``key`` stay quiet unless ``resound`` is set, and the hub's night window
 is always quiet.
 
+Set ``admins_only`` for an alert only signed-in admins may see (e.g. from a
+camera guests can't watch). Screens that aren't signed in never get it: no
+sound, no title, no frame.
+
 :func:`dismiss` closes an alert on every screen, e.g. once it has been dealt
 with somewhere else.
 
@@ -60,6 +64,7 @@ class Alert:
     sound: str | None = None
     speak: str = ""
     resound: bool = False
+    admins_only: bool = False
 
     def __post_init__(self):
         if not isinstance(self.app, str) or not _APP_ID.match(self.app):
@@ -78,6 +83,8 @@ class Alert:
             raise ValueError(f"sound must be None, {SILENT!r}, a chime name or a path on the hub, got {snd!r}")
         if not isinstance(self.speak, str) or len(self.speak) > MAX_SPEAK:
             raise ValueError(f"speak must be text of at most {MAX_SPEAK} characters")
+        if not isinstance(self.admins_only, bool):
+            raise ValueError(f"admins_only must be True or False, got {self.admins_only!r}")
 
     def as_dict(self):
         return asdict(self)
