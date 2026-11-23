@@ -14,10 +14,14 @@ __all__ = ["is_admin"]
 def is_admin(request):
     """True when the request comes from a signed-in, active hub admin.
 
-    Accepts a request (or anything with a ``user`` attribute). Requests
-    without a user, e.g. from a test ``RequestFactory``, are not admin.
+    Accepts a request (or anything with a ``user`` attribute) or a
+    websocket's ASGI scope (a dict with ``"user"``). Requests without a
+    user, e.g. from a test ``RequestFactory``, are not admin.
     """
-    user = getattr(request, "user", None)
+    if isinstance(request, dict):
+        user = request.get("user")
+    else:
+        user = getattr(request, "user", None)
     return bool(
         user is not None
         and getattr(user, "is_authenticated", False)

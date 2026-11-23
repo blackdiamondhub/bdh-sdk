@@ -600,6 +600,14 @@ and the hub proxies to it inside an iframe.
 - `bdh_sdk.identity.IdentityMiddleware` only accepts requests the hub signed
   with the app token and sets `request.user` (`username`, `is_staff`) and
   `request.bdh_mode` from the signed identity header.
+- Websockets: the hub signs the handshake the same way and
+  `bdh_sdk.runtime.websocket.HubIdentity` refuses unsigned ones (close 4403),
+  then sets `scope["user"]`, `scope["bdh_mode"]` and passes the connection to
+  the spec's `websocket_routes` (Channels URL patterns matched against the full
+  path, as in the hub; unknown paths close with 4404). `is_admin(scope)`
+  works on the scope. `bdh_sdk.wsrelay.relay(receive, send, url)` relays an
+  accepted visitor to a local service (e.g. a companion bound to loopback)
+  after the app has checked who may use it.
 - The hub reads tiles, status and shortcuts through `POST /_bdh/hook` and
   relays events through `POST /_bdh/events`; `GET /_bdh/health` is unsigned.
 - `bdh/embed.js` talks to the hub shell with `postMessage` (title, resize,
