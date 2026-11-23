@@ -39,6 +39,13 @@ class AlertTests(unittest.TestCase):
             with self.subTest(speak=bad), self.assertRaises(ValueError):
                 make(speak=bad)
 
+    def test_admins_only_is_a_flag(self):
+        self.assertFalse(make().as_dict()["admins_only"])
+        self.assertTrue(make(admins_only=True).as_dict()["admins_only"])
+        for bad in (1, "yes", None):
+            with self.subTest(admins_only=bad), self.assertRaises(ValueError):
+                make(admins_only=bad)
+
     def test_without_a_sender_push_is_a_no_op(self):
         set_sender(None)
         push(make())
