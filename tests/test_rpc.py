@@ -1,10 +1,10 @@
 import threading
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from bdh_sdk import alerts, events, ha, rpc, settings, speakers, storage
+from bdh_sdk import alerts, displays, events, ha, rpc, settings, speakers, storage
 from bdh_sdk.testing import FakeBroker
 
 
@@ -184,6 +184,22 @@ class InstalledTests(unittest.TestCase):
         self.broker.on("speakers.announce", bad)
         with self.assertRaises(speakers.AnnounceError):
             speakers.announce("hello", ["media_player.k"])
+
+    def test_displays_status(self):
+        now = datetime.now(timezone.utc)
+        self.broker.heartbeats = {"192.168.1.99": now - timedelta(seconds=90)}
+        result = displays.status()
+        self.assertEqual([c["ip"] for c in result["clients"]], ["192.168.1.99"])
+        self.assertGreaterEqual(result["clients"][0]["age_seconds"], 90)
+        self.assertIsNotNone(result["clients"][0]["last_seen"].tzinfo)
+        self.assertLessEqual(result["ready_since"], result["now"])
+
+    def test_displays_status_needs_permission(self):
+        self.broker.permissions = ["alerts"]
+        with self.assertRaises(rpc.PermissionDenied):
+            displays.status()
+        self.broker.permissions = ["displays.read"]
+        self.assertEqual(displays.status()["clients"], [])
 
     def test_uninstall_restores_in_process_defaults(self):
         rpc.uninstall()

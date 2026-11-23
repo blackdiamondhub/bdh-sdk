@@ -113,6 +113,11 @@ def assert_plugin_importable(module_path, **kwargs):
         )
     return result
 
+def _utcnow():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
+
+
 def _require(grant):
     def rule(grants, app_id, p):
         return None if grant in grants else f"needs the {grant!r} permission"
@@ -207,6 +212,7 @@ PERMISSION_RULES = {
     "speakers.announce": _require("speakers"),
     "speakers.tts": _require("speakers"),
     "hub.brand": _anyone,
+    "displays.status": _require("displays.read"),
     "shares.missing": _anyone,  # shares.* enforce their own rules
     "shares.put_blob": _anyone,
     "shares.publish": _anyone,
@@ -277,6 +283,9 @@ class FakeBroker:
         self.share_revisions = {}  # (provider, name) -> [{"revision", "main", "attachments", "updated"}]
         self.share_grants = set()  # (consumer, provider, name)
         self.share_events = []  # (recipient app_id, topic, payload)
+        self.heartbeats = {}  # ip -> aware datetime of its last heartbeat (displays.status)
+        self.ready_since = None  # aware datetime; None means "when the FakeBroker was made"
+        self._created = _utcnow()
         self.handlers = {}
         self._install = install
         self._server = None
@@ -433,6 +442,8 @@ class FakeBroker:
             return sorted(k for a, k in self.state if a == p.get("app"))
         elif op == "ha.instances":
             return [dict(i) for i in self.instances]
+        elif op == "displays.status":
+            return self._displays()
         elif op == "ha.registry":
             return self._registry(p.get("platform"), self._instance(p))
         elif op == "ha.get_all_states":
@@ -452,6 +463,16 @@ class FakeBroker:
     def _states(self, p):
         """The instance's :attr:`ha_states`, or None when the test set none."""
         return self.ha_states.get(self._instance(p))
+
+    def _displays(self):
+        now = _utcnow()
+        return {
+            "ready_since": (self.ready_since or self._created).isoformat(),
+            "now": now.isoformat(),
+            "clients": [{"ip": ip, "last_seen": seen.isoformat(),
+                         "age_seconds": max(0, int((now - seen).total_seconds()))}
+                        for ip, seen in sorted(self.heartbeats.items())],
+        }
 
     def _registry(self, platform, instance=None):
         from . import grants
