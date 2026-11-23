@@ -3,7 +3,7 @@
 Grants use the manifest permission grammar (``bdh_sdk.plugins.valid_permission``):
 ``ha.read:<entity glob>``, ``ha.call:<domain>.<service|*>``,
 ``events.publish:<topic pattern>``, ``events.subscribe:<topic pattern>``,
-``alerts``, ``speakers``, ``media``, plus the admin-only ``ha.ws``.
+``alerts``, ``speakers``, ``media``, ``displays.read``, plus the admin-only ``ha.ws``.
 
 The hub broker and :class:`bdh_sdk.testing.FakeBroker` both use these, so an
 app's tests refuse exactly what the hub would.
@@ -15,6 +15,7 @@ from . import events
 ALERTS = "alerts"
 SPEAKERS = "speakers"
 MEDIA = "media"
+DISPLAYS_READ = "displays.read"
 HA_WS = "ha.ws"
 
 

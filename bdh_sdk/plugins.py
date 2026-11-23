@@ -52,13 +52,14 @@ COMPANIONS = frozenset({"go2rtc", "aec"})
 #   events.publish:<topic glob>  publish hub events
 #   events.subscribe:<topic glob>
 #   alerts, speakers, media      raise popups, announce, upload media to HA
+#   displays.read                see which screens are checking in (bdh_sdk.displays)
 _ENTITY_GLOB = r"[a-z0-9_*]+(\.[a-z0-9_*]+)?"
 _TOPIC_GLOB = r"[A-Za-z0-9_./*#+-]+"
 _PERMISSION_RE = re.compile(
     rf"(ha\.read:{_ENTITY_GLOB}"
     r"|ha\.call:[a-z0-9_]+\.([a-z0-9_]+|\*)"
     rf"|events\.(publish|subscribe):{_TOPIC_GLOB}"
-    r"|alerts|speakers|media)"
+    r"|alerts|speakers|media|displays\.read)"
 )
 
 

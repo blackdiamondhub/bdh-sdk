@@ -574,6 +574,26 @@ speaking the message (at most 300 characters), cached for repeats. The hub uses
 it to speak alerts on its own screens (`Alert.speak`); it raises `ha.HAError`
 when HA can't make it.
 
+## Displays
+
+`bdh_sdk.displays.status()` (needs the `displays.read` permission, container
+apps only) says which screens are checking in. Every hub page posts a
+heartbeat about once a minute; the hub returns the last one per client IP:
+
+```python
+from bdh_sdk import displays
+
+s = displays.status()
+# {"ready_since": datetime, "now": datetime,
+#  "clients": [{"ip": "192.168.1.99", "last_seen": datetime, "age_seconds": 42}]}
+```
+
+Times are timezone-aware and `age_seconds` uses the hub's clock. A screen
+can't have checked in before `ready_since` (when the hub started serving), so
+treat a quiet screen as unknown until the hub has been up longer than your
+staleness limit. `FakeBroker.heartbeats` (`{ip: datetime}`) and
+`FakeBroker.ready_since` drive it in tests.
+
 ## Testing helpers
 
 ```python
