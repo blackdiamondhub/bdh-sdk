@@ -1,8 +1,8 @@
 # Hub app image builder
 
 Every hub app (hub API 2 and later) runs as its own container image,
-`ghcr.io/blackdiamondlodge/bdh-app-<id>@sha256:…`. Each image is built
-`FROM` the shared runtime base, `ghcr.io/blackdiamondlodge/bdh-app-runtime:hub-api-<N>`
+`ghcr.io/blackdiamondhub/bdh-app-<id>@sha256:…`. Each image is built
+`FROM` the shared runtime base, `ghcr.io/blackdiamondhub/bdh-app-runtime:hub-api-<N>`
 from bdh-supervisor, pinned by digest. The base provides Python 3.13, Django,
 uvicorn, whitenoise, bdh-sdk, requests, websocket-client, the non-root user
 (10001) and the entrypoint (`python -m bdh_sdk.runtime`). On top of the base,
@@ -32,13 +32,13 @@ builds the image and smoke-tests it (`app_artifacts.sh`). `app-ci.yml` does
 the same on every PR (job `image`).
 
 The platform does the actual build in one builder workflow,
-`blackdiamondlodge/bdh-app-catalog/.github/workflows/build.yml`. For each
+`blackdiamondhub/bdh-app-catalog/.github/workflows/build.yml`. For each
 app's latest release it:
 
 1. verifies the release assets' attestations;
 2. builds the image with `build_app.sh` against the current base digest;
 3. runs `smoke.sh`;
-4. pushes the image to `ghcr.io/blackdiamondlodge/bdh-app-<id>`;
+4. pushes the image to `ghcr.io/blackdiamondhub/bdh-app-<id>`;
 5. attests the image (signer identity: that workflow on `main`);
 6. opens a single catalog PR.
 

@@ -8,14 +8,14 @@
 # bdh-lock.txt, bdh-extra.Dockerfile (custom_base apps only, copied from
 # docker/bdh-extra.Dockerfile next to pyproject.toml) and smoke.json, and
 # leaves the image tagged bdh-app-<id>:candidate. The base defaults to
-# ghcr.io/blackdiamondlodge/bdh-app-runtime:hub-api-${HUB_API:-2}, pulled and
+# ghcr.io/blackdiamondhub/bdh-app-runtime:hub-api-${HUB_API:-2}, pulled and
 # pinned by digest. SMOKE_ENV_FILE / SMOKE_SETTLE are passed to smoke.sh.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 wheel=$1
 pyproject=$2
 out=$3
-base=${4:-ghcr.io/blackdiamondlodge/bdh-app-runtime:hub-api-${HUB_API:-2}}
+base=${4:-ghcr.io/blackdiamondhub/bdh-app-runtime:hub-api-${HUB_API:-2}}
 
 case "$base" in
     *@sha256:*) ;;

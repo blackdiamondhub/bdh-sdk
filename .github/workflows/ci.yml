@@ -36,7 +36,7 @@ jobs:
   stack-e2e:
     # This SDK installed into the app runtime and building the apps, with the
     # hub and supervisor pinned by the hub's tests/e2e/stack.lock.json.
-    uses: blackdiamondlodge/BlackDiamondHub/.github/workflows/stack-e2e.yml@5ec2a490d90b722d83b498ccaf9cc776ba1f973f
+    uses: blackdiamondhub/BlackDiamondHub/.github/workflows/stack-e2e.yml@dba0a26f7c2f458a22c1a601fc8646e396a19b6d
     with:
       sdk_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       sdk_ref: ${{ github.event.pull_request.head.sha || github.sha }}

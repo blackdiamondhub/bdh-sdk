@@ -1,6 +1,6 @@
 # Hub app repo template
 
-Each hub app lives in its own repo under `blackdiamondlodge` (e.g.
+Each hub app lives in its own repo under `blackdiamondhub` (e.g.
 `bdh-app-wifi`) and is installed into the hub as an ordinary Python package.
 The hub finds it through the `blackdiamondhub.plugins` entry point.
 
@@ -80,7 +80,7 @@ python -m zipfile -l dist/bdh_app_wifi-0.1.0-py3-none-any.whl
 ```
 
 `bdh-sdk` is not on PyPI. Install it from GitHub before installing the app,
-e.g. `pip install "bdh-sdk @ git+https://github.com/blackdiamondlodge/bdh-sdk@v0"`.
+e.g. `pip install "bdh-sdk @ git+https://github.com/blackdiamondhub/bdh-sdk@v0"`.
 
 ## `<id>/plugin.py`
 
@@ -130,7 +130,7 @@ on:
 
 jobs:
   hub:
-    uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-ci.yml@v0
+    uses: blackdiamondhub/bdh-sdk/.github/workflows/app-ci.yml@v0
     with:
       app_id: wifi
 ```

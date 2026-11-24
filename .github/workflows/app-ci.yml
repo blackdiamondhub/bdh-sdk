@@ -7,7 +7,7 @@ name: Hub app CI
 #
 #   jobs:
 #     hub:
-#       uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-ci.yml@v0
+#       uses: blackdiamondhub/bdh-sdk/.github/workflows/app-ci.yml@v0
 #       with:
 #         app_id: wifi
 
@@ -19,7 +19,7 @@ on:
         required: true
         type: string
       hub_ref:
-        description: Branch, tag or SHA of blackdiamondlodge/BlackDiamondHub to test against.
+        description: Branch, tag or SHA of blackdiamondhub/BlackDiamondHub to test against.
         required: false
         type: string
         default: main
@@ -33,7 +33,7 @@ on:
         type: string
         default: ""
       sdk_ref:
-        description: Git ref of blackdiamondlodge/bdh-sdk to install.
+        description: Git ref of blackdiamondhub/bdh-sdk to install.
         required: false
         type: string
         default: v0
@@ -101,7 +101,7 @@ jobs:
       - name: Checkout hub
         uses: actions/checkout@v4
         with:
-          repository: blackdiamondlodge/BlackDiamondHub
+          repository: blackdiamondhub/BlackDiamondHub
           ref: ${{ inputs.hub_ref }}
           path: hub
           token: ${{ secrets.hub_token || github.token }}
@@ -135,7 +135,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           pip install -r hub/requirements.txt
-          pip install "bdh-sdk @ git+https://github.com/blackdiamondlodge/bdh-sdk@${{ inputs.sdk_ref }}"
+          pip install "bdh-sdk @ git+https://github.com/blackdiamondhub/bdh-sdk@${{ inputs.sdk_ref }}"
 
       - name: Build and install the app wheel
         run: |
@@ -181,7 +181,7 @@ jobs:
       - name: Checkout hub
         uses: actions/checkout@v4
         with:
-          repository: blackdiamondlodge/BlackDiamondHub
+          repository: blackdiamondhub/BlackDiamondHub
           ref: ${{ inputs.hub_ref }}
           path: hub
           token: ${{ secrets.hub_token || github.token }}
@@ -217,7 +217,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           pip install -r hub/requirements.txt
-          pip install "bdh-sdk @ git+https://github.com/blackdiamondlodge/bdh-sdk@${{ inputs.sdk_ref }}"
+          pip install "bdh-sdk @ git+https://github.com/blackdiamondhub/bdh-sdk@${{ inputs.sdk_ref }}"
           python -m build --wheel -o dist app
           pip install dist/*.whl
 
@@ -256,7 +256,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: blackdiamondlodge/bdh-sdk
+          repository: blackdiamondhub/bdh-sdk
           ref: ${{ inputs.sdk_ref }}
           path: .bdh-sdk
 
@@ -301,7 +301,7 @@ jobs:
           cp "$RUNNER_TEMP"/image/bdh-app.json "$RUNNER_TEMP"/image/*.whl "$out/"
           app=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$out/bdh-app.json")
           docker save -o "$out/image.tar" "bdh-app-$app:candidate"
-          docker image inspect -f '{{index .RepoDigests 0}}' "ghcr.io/blackdiamondlodge/bdh-app-runtime:hub-api-$HUB_API" > "$out/base.txt"
+          docker image inspect -f '{{index .RepoDigests 0}}' "ghcr.io/blackdiamondhub/bdh-app-runtime:hub-api-$HUB_API" > "$out/base.txt"
 
       - uses: actions/upload-artifact@v4
         if: ${{ inputs.stack_e2e }}
@@ -316,7 +316,7 @@ jobs:
     # rest of the stack pinned by the hub's tests/e2e/stack.lock.json.
     needs: image
     if: ${{ inputs.stack_e2e && inputs.image }}
-    uses: blackdiamondlodge/BlackDiamondHub/.github/workflows/stack-e2e.yml@5ec2a490d90b722d83b498ccaf9cc776ba1f973f
+    uses: blackdiamondhub/BlackDiamondHub/.github/workflows/stack-e2e.yml@dba0a26f7c2f458a22c1a601fc8646e396a19b6d
     with:
       app_artifact: stack-e2e-app
       sdk_ref: ${{ inputs.sdk_ref }}
