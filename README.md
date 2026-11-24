@@ -1,7 +1,7 @@
 # bdh-sdk
 
 The Black Diamond Hub SDK: the small contract package that hub apps import to
-describe themselves to [Black Diamond Hub](https://github.com/blackdiamondlodge/BlackDiamondHub).
+describe themselves to [Black Diamond Hub](https://github.com/blackdiamondhub/BlackDiamondHub).
 
 Hub apps are Django apps that live in their own repos (e.g. `bdh-app-wifi`)
 and register a `blackdiamondhub.plugins` entry point that resolves to a
@@ -16,7 +16,7 @@ See [docs/app-template.md](docs/app-template.md) for the layout of an app repo.
 `bdh-sdk` is not published to PyPI. Install a tagged release from GitHub:
 
 ```
-pip install "bdh-sdk @ git+https://github.com/blackdiamondlodge/bdh-sdk@v0.1.0"
+pip install "bdh-sdk @ git+https://github.com/blackdiamondhub/bdh-sdk@v0.1.0"
 ```
 
 or download the wheel attached to the GitHub release (its sha256 is in the
@@ -693,12 +693,12 @@ on:
     branches: [main]
 jobs:
   hub:
-    uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-ci.yml@v0
+    uses: blackdiamondhub/bdh-sdk/.github/workflows/app-ci.yml@v0
     with:
       app_id: wifi
 ```
 
-It checks out the app (into `app/`) and `blackdiamondlodge/BlackDiamondHub`
+It checks out the app (into `app/`) and `blackdiamondhub/BlackDiamondHub`
 (into `hub/`), installs the hub requirements and `bdh-sdk`, builds and
 installs the app wheel, then:
 
@@ -729,7 +729,7 @@ workflow. Call it on pushes to `main`:
 ```yaml
 jobs:
   release:
-    uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-release.yml@v0
+    uses: blackdiamondhub/bdh-sdk/.github/workflows/app-release.yml@v0
     permissions:
       contents: write
       id-token: write      # build provenance attestation
@@ -766,8 +766,8 @@ Release flow for a change worth trying first:
    entry's channel to `stable`, keeping the same image (no rebuild).
 
 App repos build no images and need no secrets. The platform builder in
-[bdh-app-catalog](https://github.com/blackdiamondlodge/bdh-app-catalog)
-turns the release into `ghcr.io/blackdiamondlodge/bdh-app-<id>` and opens the
+[bdh-app-catalog](https://github.com/blackdiamondhub/bdh-app-catalog)
+turns the release into `ghcr.io/blackdiamondhub/bdh-app-<id>` and opens the
 catalog PR. Declare system packages, excluded dependencies and `custom_base`
 in `[tool.bdh]`; see [builder/README.md](builder/README.md).
 ## Development

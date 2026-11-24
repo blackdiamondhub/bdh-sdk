@@ -72,7 +72,7 @@ jobs:
           git push origin "refs/tags/$TAG"
 
           # Moving major tag (e.g. v0) so app repos can pin
-          # blackdiamondlodge/bdh-sdk/.github/workflows/app-ci.yml@v0.
+          # blackdiamondhub/bdh-sdk/.github/workflows/app-ci.yml@v0.
           git tag -fa "$MAJOR" -m "bdh-sdk $VERSION" "$TAG^{commit}"
           git push -f origin "refs/tags/$MAJOR"
 

@@ -14,8 +14,8 @@ name: Hub app release
 # Before publishing it builds the image from these files with bdh-sdk's
 # builder and smoke-tests it, and it attests every asset's build provenance.
 # App repos build no images and push nothing else: the central builder in
-# blackdiamondlodge/bdh-app-catalog verifies the attestations, builds,
-# smoke-tests, pushes and attests ghcr.io/blackdiamondlodge/bdh-app-<id>, and
+# blackdiamondhub/bdh-app-catalog verifies the attestations, builds,
+# smoke-tests, pushes and attests ghcr.io/blackdiamondhub/bdh-app-<id>, and
 # opens the catalog PR (see bdh-sdk builder/README.md).
 #
 #   on:
@@ -23,7 +23,7 @@ name: Hub app release
 #       branches: [main]
 #   jobs:
 #     release:
-#       uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-release.yml@v0
+#       uses: blackdiamondhub/bdh-sdk/.github/workflows/app-release.yml@v0
 #       permissions:
 #         contents: write
 #         id-token: write      # build provenance attestation (required)
@@ -33,7 +33,7 @@ on:
   workflow_call:
     inputs:
       sdk_ref:
-        description: Git ref of blackdiamondlodge/bdh-sdk whose builder to use.
+        description: Git ref of blackdiamondhub/bdh-sdk whose builder to use.
         required: false
         type: string
         default: v0
@@ -80,7 +80,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: blackdiamondlodge/bdh-sdk
+          repository: blackdiamondhub/bdh-sdk
           ref: ${{ inputs.sdk_ref }}
           path: .bdh-sdk
 
@@ -162,7 +162,7 @@ jobs:
             echo
             git log -1 --format=%s
             echo
-            echo "The platform builds ghcr.io/blackdiamondlodge/bdh-app-<id> from these assets"
+            echo "The platform builds ghcr.io/blackdiamondhub/bdh-app-<id> from these assets"
             echo "and adds it to the app catalog."
             echo
             echo "Smoke test of the image built from them:"
