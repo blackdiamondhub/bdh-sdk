@@ -91,7 +91,7 @@ def describe(spec):
         **spec.manifest(),
         "tiles": [
             {"title": t.title, "url": _url(t.url_name), "url_name": t.url_name, "icon": t.icon,
-             "section": t.section, "subtitle": t.subtitle, "order": t.order,
+             "icon_on": t.icon_on, "section": t.section, "subtitle": t.subtitle, "order": t.order,
              "modes": sorted(t.modes)}
             for t in spec.tiles
         ],

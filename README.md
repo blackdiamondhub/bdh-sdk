@@ -54,6 +54,9 @@ size; tile-wide `actions` are used when it is too small for rows. Taps call
 `run_action(row_id, action_id)` (`row_id` is `""` for tile-wide actions).
 Set `Status.refresh` (seconds) for things that change quickly: the
 homepage checks that often while the status is showing.
+A `Tile` can set `icon_on`: the homepage shows it instead of `icon`
+while the app's status level is `ON` (an animated SVG works, e.g. a lit
+fireplace).
 With `Status.readings` (`Reading`s, no rows) the tile shows the first one
 big and the rest as small stats; unit `"C"` follows the hub's °C/°F toggle.
 
