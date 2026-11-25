@@ -33,7 +33,8 @@ from bdh_sdk import identity, plugins, runtime
 
 spec = plugins.PluginSpec(
     id="demo", app="demoapp", urls="demoapp.urls", status="demoapp.status",
-    tiles=(plugins.Tile(title="Demo", url_name="demo_home", icon="demo/icon.svg", section="more"),),
+    tiles=(plugins.Tile(title="Demo", url_name="demo_home", icon="demo/icon.svg", section="more",
+                              icon_on="demo/icon-on.svg"),),
     settings=(plugins.Setting(key="color", label="Colour", type="choice", choices=("red", "blue")),),
     permissions=("alerts",),
 )
@@ -128,6 +129,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(m["permissions"], ["alerts"])
         self.assertEqual(m["hooks"], ["status"])
         self.assertEqual(m["tiles"][0]["url"], "/demo/")
+        self.assertEqual(m["tiles"][0]["icon_on"], "demo/icon-on.svg")
         self.assertEqual(m["settings"][0]["choices"], [["red", "red"], ["blue", "blue"]])
         self.assertEqual(out["manifest_unsigned"], 403)
         self.assertEqual(out["hook"], {"result": {"text": "all good", "level": "info"}})

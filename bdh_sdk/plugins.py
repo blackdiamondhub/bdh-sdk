@@ -110,6 +110,9 @@ class Tile:
     subtitle: str = ""
     order: int = 100
     modes: frozenset = ALL_MODES
+    # Shown instead of ``icon`` while the app's status level is ON, e.g. a
+    # fireplace with animated flames. Same kind of static path as ``icon``.
+    icon_on: str = ""
 
 
 # Status levels. "on" highlights something that is running (lights on, lifts
