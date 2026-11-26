@@ -447,6 +447,11 @@ class PluginSpec:
       anything else for a bare failure. Accepts an optional ``mode``
       argument. ``tools`` and ``run_tool`` come together.
 
+    ``assistant=False`` keeps the app out of the hub's assistant entirely:
+    the tool gateway then offers none of its tools, shortcuts or status
+    buttons to any session (voice, owner list, MCP), nor its status in
+    ``hub__status``. It can't be combined with ``tools``/``run_tool``.
+
     ``settings`` lists the :class:`Setting` objects admins can change on the
     hub's Settings page; the app gets its own section there when non-empty.
     ``settings_pages`` lists :class:`SettingsPage` links shown in that
@@ -494,6 +499,7 @@ class PluginSpec:
     card: str | None = None
     tools: str | None = None
     run_tool: str | None = None
+    assistant: bool = True
     settings: tuple[Setting, ...] = field(default_factory=tuple)
     settings_pages: tuple[SettingsPage, ...] = field(default_factory=tuple)
     provides: dict[str, str] = field(default_factory=dict, hash=False)
@@ -512,6 +518,10 @@ class PluginSpec:
     def __post_init__(self):
         if bool(self.tools) != bool(self.run_tool):
             raise ValueError(f"plugin {self.id!r} needs both tools and run_tool, or neither")
+        if not isinstance(self.assistant, bool):
+            raise ValueError(f"plugin {self.id!r} assistant must be True or False")
+        if not self.assistant and self.tools:
+            raise ValueError(f"plugin {self.id!r} has tools but opts out of the assistant")
         self._check_shares()
         keys = [key for key, _label in self.stat_keys]
         if len(keys) != len(set(keys)):
@@ -599,6 +609,7 @@ class PluginSpec:
             "provides": sorted(self.provides),
             "shares": [dict(s) for s in self.shares],
             "reads": sorted(set(self.reads)),
+            "assistant": self.assistant,
         }
 
     @property
