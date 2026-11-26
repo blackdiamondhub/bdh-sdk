@@ -50,7 +50,7 @@ _READ_OPS = frozenset({
     "settings.get", "state.get", "state.keys", "hub.brand",
     "ha.get_entity_state", "ha.get_entity_states", "ha.get_history",
     "ha.get_all_states", "ha.get_static", "ha.instances", "ha.registry", "speakers.list", "secrets.get",
-    "displays.status",
+    "displays.status", "stays.current",
 })
 _RETRY_STATUS = frozenset({502, 503, 504})
 

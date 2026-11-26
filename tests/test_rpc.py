@@ -201,6 +201,45 @@ class InstalledTests(unittest.TestCase):
         self.broker.permissions = ["displays.read"]
         self.assertEqual(displays.status()["clients"], [])
 
+    def test_stays_current(self):
+        import hashlib
+
+        from bdh_sdk import Stay, stays
+
+        self.assertIsNone(stays.current())
+        mt = timezone(timedelta(hours=-7))
+        arrival = datetime(2026, 12, 20, 16, 0, tzinfo=mt)
+        self.broker.stay = Stay("The Smiths", arrival, datetime.now(mt) + timedelta(days=2))
+        cur = stays.current()
+        self.assertEqual(cur.stay, self.broker.stay)
+        self.assertEqual(cur.stay.arrival.utcoffset(), timedelta(hours=-7))
+        self.assertFalse(cur.stay.owner)
+        # The hub's identity "stay" key (hub/context_processors.stay_key).
+        expected = hashlib.sha256(f"The Smiths|{arrival.isoformat()}".encode()).hexdigest()[:12]
+        self.assertEqual(cur.key, expected)
+        self.assertEqual(stays.key("x"), hashlib.sha256(b"x|").hexdigest()[:12])
+
+        self.broker.stay = Stay("Gone", arrival, datetime.now(timezone.utc) - timedelta(minutes=1))
+        self.assertIsNone(stays.current())
+
+    def test_stays_current_needs_permission_and_raises(self):
+        from bdh_sdk import Stay, stays
+
+        self.broker.stay = Stay("Owners", owner=True)
+        self.broker.permissions = ["displays.read"]
+        with self.assertRaises(rpc.PermissionDenied):
+            stays.current()
+        self.broker.permissions = ["stays.read"]
+        cur = stays.current()
+        self.assertTrue(cur.stay.owner)
+        self.assertIsNone(cur.stay.arrival)
+
+        def boom(payload):
+            raise FakeBroker.Error("internal", status=500)
+        self.broker.handlers["stays.current"] = boom
+        with self.assertRaises(rpc.BrokerError):
+            stays.current()
+
     def test_uninstall_restores_in_process_defaults(self):
         rpc.uninstall()
         self.assertFalse(rpc.installed())

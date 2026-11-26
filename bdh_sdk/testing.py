@@ -213,6 +213,7 @@ PERMISSION_RULES = {
     "speakers.tts": _require("speakers"),
     "hub.brand": _anyone,
     "displays.status": _require("displays.read"),
+    "stays.current": _require("stays.read"),
     "shares.missing": _anyone,  # shares.* enforce their own rules
     "shares.put_blob": _anyone,
     "shares.publish": _anyone,
@@ -286,6 +287,7 @@ class FakeBroker:
         self.heartbeats = {}  # ip -> aware datetime of its last heartbeat (displays.status)
         self.ready_since = None  # aware datetime; None means "when the FakeBroker was made"
         self._created = _utcnow()
+        self.stay = None  # bdh_sdk.Stay in progress (stays.current); None between stays
         self.handlers = {}
         self._install = install
         self._server = None
@@ -444,6 +446,8 @@ class FakeBroker:
             return [dict(i) for i in self.instances]
         elif op == "displays.status":
             return self._displays()
+        elif op == "stays.current":
+            return self._stay()
         elif op == "ha.registry":
             return self._registry(p.get("platform"), self._instance(p))
         elif op == "ha.get_all_states":
@@ -473,6 +477,16 @@ class FakeBroker:
                          "age_seconds": max(0, int((now - seen).total_seconds()))}
                         for ip, seen in sorted(self.heartbeats.items())],
         }
+
+    def _stay(self):
+        from . import stays
+        s = self.stay
+        if s is None or (s.checkout is not None and s.checkout <= _utcnow()):
+            return {"stay": None}
+        def iso(t):
+            return t.isoformat() if t else None
+        return {"stay": {"guest": s.guest, "arrival": iso(s.arrival), "checkout": iso(s.checkout),
+                         "owner": bool(s.owner), "key": stays.key(s.guest, s.arrival)}}
 
     def _registry(self, platform, instance=None):
         from . import grants

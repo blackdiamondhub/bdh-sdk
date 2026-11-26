@@ -107,7 +107,7 @@ class ManifestTests(unittest.TestCase):
         perms = ("ha.read:sensor.*", "ha.read:*", "ha.read:light.kitchen",
                  "ha.call:light.turn_on", "ha.call:scene.*",
                  "events.publish:cameras/motion", "events.subscribe:cameras/#",
-                 "alerts", "speakers", "media", "displays.read")
+                 "alerts", "speakers", "media", "displays.read", "stays.read")
         spec = PluginSpec(id="a", app="a", permissions=perms)
         self.assertEqual(spec.manifest()["permissions"], sorted(perms))
 

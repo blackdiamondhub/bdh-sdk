@@ -597,6 +597,37 @@ treat a quiet screen as unknown until the hub has been up longer than your
 staleness limit. `FakeBroker.heartbeats` (`{ip: datetime}`) and
 `FakeBroker.ready_since` drive it in tests.
 
+## Stays
+
+`bdh_sdk.stays.current()` (needs the `stays.read` permission, container apps
+only) returns who is staying at the lodge right now, the same stay the
+homepage uses for guest mode, or `None` between stays:
+
+```python
+from bdh_sdk import stays
+
+cur = stays.current()  # CurrentStay | None
+if cur:
+    cur.stay      # bdh_sdk.Stay(guest, arrival, checkout, owner); aware datetimes
+    cur.key       # opaque 12-char id, equal to request.bdh_stay_key
+```
+
+The hub caches the answer, keeps the last good one when the app reporting
+stays fails, and drops a stay once its checkout has passed. A broker failure
+raises `rpc.BrokerError` (`rpc.PermissionDenied` without the grant) instead of
+returning `None`, so keep your last known stay when it does.
+`stays.key(guest, arrival)` computes the key. In tests set
+`FakeBroker.stay = Stay(...)` (`None` between stays):
+
+```python
+from bdh_sdk import Stay, stays
+from bdh_sdk.testing import FakeBroker
+
+with FakeBroker(permissions=["stays.read"], install=True) as broker:
+    broker.stay = Stay("The Smiths", arrival, checkout)
+    assert stays.current().stay.guest == "The Smiths"
+```
+
 ## Testing helpers
 
 ```python
