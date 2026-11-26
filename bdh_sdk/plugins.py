@@ -54,13 +54,14 @@ COMPANIONS = frozenset({"go2rtc", "aec"})
 #   alerts, speakers, media      raise popups, announce, upload media to HA
 #   displays.read                see which screens are checking in (bdh_sdk.displays)
 #   stays.read                   see who is staying (bdh_sdk.stays)
+#   tools                        run assistant sessions over the apps' tools (bdh_sdk.tools)
 _ENTITY_GLOB = r"[a-z0-9_*]+(\.[a-z0-9_*]+)?"
 _TOPIC_GLOB = r"[A-Za-z0-9_./*#+-]+"
 _PERMISSION_RE = re.compile(
     rf"(ha\.read:{_ENTITY_GLOB}"
     r"|ha\.call:[a-z0-9_]+\.([a-z0-9_]+|\*)"
     rf"|events\.(publish|subscribe):{_TOPIC_GLOB}"
-    r"|alerts|speakers|media|displays\.read|stays\.read)"
+    r"|alerts|speakers|media|displays\.read|stays\.read|tools)"
 )
 
 
@@ -435,6 +436,16 @@ class PluginSpec:
     - ``card``: ``() -> Card | None``. The lodge card shown at the top of
       the homepage in every mode; the first app that provides one is used.
       Called like ``status``.
+    - ``tools``: ``() -> iterable of Tool`` (:class:`bdh_sdk.tools.Tool`),
+      what the hub's assistant may look up or do through the app. Called
+      like ``status`` and accepts an optional ``mode`` argument too.
+    - ``run_tool``: ``(tool_id, args) -> str | dict | list | None``. Runs a
+      tool the hub has already checked is offered in the session's mode,
+      with ``args`` validated against its ``params``. Return a short
+      JSON-serialisable result for the model; raise
+      :class:`bdh_sdk.tools.ToolError` with a message it may pass on, or
+      anything else for a bare failure. Accepts an optional ``mode``
+      argument. ``tools`` and ``run_tool`` come together.
 
     ``settings`` lists the :class:`Setting` objects admins can change on the
     hub's Settings page; the app gets its own section there when non-empty.
@@ -481,6 +492,8 @@ class PluginSpec:
     websocket_routes: str | None = None
     stay: str | None = None
     card: str | None = None
+    tools: str | None = None
+    run_tool: str | None = None
     settings: tuple[Setting, ...] = field(default_factory=tuple)
     settings_pages: tuple[SettingsPage, ...] = field(default_factory=tuple)
     provides: dict[str, str] = field(default_factory=dict, hash=False)
@@ -497,6 +510,8 @@ class PluginSpec:
     reads: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
+        if bool(self.tools) != bool(self.run_tool):
+            raise ValueError(f"plugin {self.id!r} needs both tools and run_tool, or neither")
         self._check_shares()
         keys = [key for key, _label in self.stat_keys]
         if len(keys) != len(set(keys)):

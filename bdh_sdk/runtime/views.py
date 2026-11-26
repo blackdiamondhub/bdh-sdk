@@ -13,10 +13,10 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .. import hooks
-
+from ..tools import ToolError
 log = logging.getLogger(__name__)
 
-_HOOK_ARGS = ("mode", "shortcut_id", "row_id", "action_id", "capability", "key")
+_HOOK_ARGS = ("mode", "shortcut_id", "row_id", "action_id", "capability", "key", "tool_id", "args")
 
 
 def _internal(request):
@@ -47,6 +47,8 @@ def hook(request):
         result = hooks.run(app_spec(), body["hook"], **kwargs)
     except hooks.HookNotFound:
         return JsonResponse({"error": "no such hook"}, status=404)
+    except ToolError as exc:
+        return JsonResponse({"error": "tool_error", "message": str(exc)[:300]}, status=422)
     except Exception:
         log.exception("hook %s failed", body["hook"])
         return JsonResponse({"error": "hook failed"}, status=500)
@@ -95,7 +97,8 @@ def describe(spec):
              "modes": sorted(t.modes)}
             for t in spec.tiles
         ],
-        "hooks": [h for h in ("status", "shortcuts", "run_shortcut", "run_action", "stay", "card")
+        "hooks": [h for h in ("status", "shortcuts", "run_shortcut", "run_action", "stay", "card",
+                              "tools", "run_tool")
                   if getattr(spec, h)],
         "settings": [
             {**{f: getattr(s, f) for f in setting_fields},

@@ -14,6 +14,20 @@ ROOT = Path(__file__).resolve().parents[1]
 DEMO_INIT = '''
 def status():
     return "all good"
+
+
+def tools():
+    from bdh_sdk.tools import Tool
+    return [Tool("look", "Look", "Look around.", readonly=True)]
+
+
+def run_tool(tool_id, args):
+    from bdh_sdk.tools import ToolError
+    if args.get("fail"):
+        raise ToolError("the tub is offline")
+    if args.get("crash"):
+        raise RuntimeError("secret detail")
+    return {"tool": tool_id, "args": args}
 '''
 DEMO_URLS = '''
 from django.http import JsonResponse
@@ -33,6 +47,7 @@ from bdh_sdk import identity, plugins, runtime
 
 spec = plugins.PluginSpec(
     id="demo", app="demoapp", urls="demoapp.urls", status="demoapp.status",
+    tools="demoapp.tools", run_tool="demoapp.run_tool",
     tiles=(plugins.Tile(title="Demo", url_name="demo_home", icon="demo/icon.svg", section="more",
                               icon_on="demo/icon-on.svg"),),
     settings=(plugins.Setting(key="color", label="Colour", type="choice", choices=("red", "blue")),),
@@ -72,6 +87,12 @@ out["hook"] = post("/_bdh/hook", {"hook": "status"}).json()
 out["hook_unsigned_body"] = post("/_bdh/hook", {"hook": "status"}, sign_body=False).status_code
 out["hook_missing"] = post("/_bdh/hook", {"hook": "card"}).status_code
 out["hook_bad"] = post("/_bdh/hook", {"nope": 1}).status_code
+out["tools"] = post("/_bdh/hook", {"hook": "tools"}).json()
+out["run_tool"] = post("/_bdh/hook", {"hook": "run_tool", "tool_id": "look", "args": {"x": 1}}).json()
+r = post("/_bdh/hook", {"hook": "run_tool", "tool_id": "look", "args": {"fail": 1}})
+out["tool_error"] = [r.status_code, r.json()]
+r = post("/_bdh/hook", {"hook": "run_tool", "tool_id": "look", "args": {"crash": 1}})
+out["tool_crash"] = [r.status_code, r.json()]
 from bdh_sdk import events
 got = []
 events.subscribe("demo/+", lambda e: got.append(e.topic))
@@ -127,7 +148,7 @@ class RuntimeTests(unittest.TestCase):
         m = out["manifest"]
         self.assertEqual(m["id"], "demo")
         self.assertEqual(m["permissions"], ["alerts"])
-        self.assertEqual(m["hooks"], ["status"])
+        self.assertEqual(m["hooks"], ["status", "tools", "run_tool"])
         self.assertEqual(m["tiles"][0]["url"], "/demo/")
         self.assertEqual(m["tiles"][0]["icon_on"], "demo/icon-on.svg")
         self.assertEqual(m["settings"][0]["choices"], [["red", "red"], ["blue", "blue"]])
@@ -136,6 +157,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(out["hook_unsigned_body"], 403)
         self.assertEqual(out["hook_missing"], 404)
         self.assertEqual(out["hook_bad"], 400)
+        self.assertEqual([t["id"] for t in out["tools"]["result"]], ["look"])
+        self.assertEqual(out["run_tool"], {"result": {"tool": "look", "args": {"x": 1}}})
+        self.assertEqual(out["tool_error"], [422, {"error": "tool_error", "message": "the tub is offline"}])
+        self.assertEqual(out["tool_crash"], [500, {"error": "hook failed"}])
         self.assertEqual(out["event"], {"ok": True})
         self.assertEqual(out["got"], ["demo/ping"])
         self.assertEqual(out["wrong_path_sig"], 403)

@@ -44,7 +44,7 @@ spec = PluginSpec(
 `ON`, `WARN`, `STATUS_LEVELS`, and the frozen dataclasses `PluginSpec`,
 `Tile`, `Status`, `StatusRow`, `Action`, `Shortcut`, `Stay`, `Card`, `Reading` and
 `Setting`. Hooks (`status`, `shortcuts`, `run_shortcut`, `run_action`,
-`websocket_routes`, `stay`, `card`) are dotted
+`websocket_routes`, `stay`, `card`, `tools`, `run_tool`) are dotted
 `module.attribute` paths that the hub resolves lazily.
 
 A `status` hook can return live `rows` (`StatusRow`: title, detail,
@@ -627,6 +627,76 @@ with FakeBroker(permissions=["stays.read"], install=True) as broker:
     broker.stay = Stay("The Smiths", arrival, checkout)
     assert stays.current().stay.guest == "The Smiths"
 ```
+
+## Assistant tools
+
+An app offers the hub's assistant things to look up or do with a `tools`
+hook returning `bdh_sdk.tools.Tool`s and a `run_tool` hook that runs them
+(both or neither):
+
+```python
+from bdh_sdk import ALL_MODES
+from bdh_sdk.tools import Tool, ToolError
+
+def tools(mode=None):
+    return [Tool(
+        id="set_temperature", title="Set hot tub temperature",
+        description="Set the hot tub's target temperature in °C.",
+        params={"type": "object", "required": ["celsius"],
+                "properties": {"celsius": {"type": "integer", "minimum": 30, "maximum": 40}}},
+        modes=ALL_MODES, confirm=True,
+    )]
+
+def run_tool(tool_id, args, mode=None):
+    if tool_id == "set_temperature":
+        set_target(args["celsius"])
+        return f"Set to {args['celsius']} °C"
+    raise ToolError(f"unknown tool {tool_id}")
+```
+
+`Tool` fields: `id` (lowercase letters, digits, single underscores, ≤ 40
+chars), `title` (≤ 60), `description` (what the model reads to pick the
+tool, ≤ 300), `params` (a flat JSON-schema object: properties of type
+`string`, `integer`, `number` or `boolean` with optional `description`,
+`enum`, `minimum`/`maximum`, `minLength`/`maxLength`; unknown arguments are
+refused), `modes` (**owner-only by default**: list `GUEST`/`DASHBOARD` to let
+guests' sessions use it), `confirm` (ask the user first) and `readonly` (a
+pure lookup). The hub checks the session's mode and the arguments
+(`bdh_sdk.tools.validate_args`) before calling `run_tool`, so `args` is
+already clean. Return a short string or JSON-serialisable dict/list for the
+model; raise `ToolError("message")` for a failure the assistant may explain
+(any other exception is a bare "the tool failed").
+
+The hub also offers every app's quick actions and status buttons as tools,
+and a read-only `hub__status` summary of the homepage, in the modes where
+they show on the homepage.
+
+An app with the `tools` permission (the admin must grant it) can run an
+assistant session, e.g. the voice app's language-model loop:
+
+```python
+from bdh_sdk import tools
+
+token = tools.open_session("voice", display="192.168.1.50")  # valid ~15 min
+for t in tools.list_tools(token):
+    t["name"], t["description"], t["parameters"]  # an OpenAI function definition
+answer = tools.call_tool(token, "hottub__set_temperature", {"celsius": 38})
+# {"ok": True, "result": ...} or {"ok": False, "error": "..."}
+```
+
+The hub, not the app, picks the session's mode: a `voice` session is guest
+mode while a stay is active and dashboard mode otherwise, never owner, and
+re-checked on every call. Tool names are `<app>__<tool>`, mapped to
+`^[a-zA-Z0-9_-]{1,64}$` (`tools.tool_name`). A forged, expired or other
+app's token raises `rpc.BrokerError` with code `tools.BAD_SESSION`: open a
+new session. The hub records every session and call as hub-only
+`assistant/<sid>/open` and `assistant/<sid>/call` events, which no app may
+publish.
+
+In tests, `FakeBroker.add_tool(Tool(...), fn)` offers a tool to sessions
+(`fn(args)` runs it); `broker.stay` drives the session mode,
+`broker.assistant_dashboard_control = False` limits dashboard sessions to
+read-only tools, and `broker.tool_calls` records each call.
 
 ## Testing helpers
 
