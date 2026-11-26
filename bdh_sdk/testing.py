@@ -214,6 +214,9 @@ PERMISSION_RULES = {
     "hub.brand": _anyone,
     "displays.status": _require("displays.read"),
     "stays.current": _require("stays.read"),
+    "tools.open": _require("tools"),
+    "tools.list": _require("tools"),
+    "tools.call": _require("tools"),
     "shares.missing": _anyone,  # shares.* enforce their own rules
     "shares.put_blob": _anyone,
     "shares.publish": _anyone,
@@ -250,7 +253,10 @@ class FakeBroker:
     :attr:`app_id` as the caller (set it to act as another app): declare
     shares with :meth:`set_manifest_shares`, grant them with
     :meth:`grant_share` / :meth:`revoke_share`; notifications land in
-    :attr:`share_events` as ``(recipient, topic, payload)``. Anything else answers ``None`` unless a
+    :attr:`share_events` as ``(recipient, topic, payload)``. It runs the
+    ``tools.*`` ops (assistant sessions) over tools added with
+    :meth:`add_tool`, in the mode the hub would pick (:meth:`session_mode`),
+    and records each call in :attr:`tool_calls`. Anything else answers ``None`` unless a
     handler is registered with :meth:`on` (``fn(payload) -> result``; raise
     :class:`FakeBroker.Error` to fail the call). With ``permissions`` (a
     list of manifest permission strings) every op is checked first under the
@@ -288,6 +294,10 @@ class FakeBroker:
         self.ready_since = None  # aware datetime; None means "when the FakeBroker was made"
         self._created = _utcnow()
         self.stay = None  # bdh_sdk.Stay in progress (stays.current); None between stays
+        self.assistant_tools = {}  # name -> (Tool, fn(args) -> result)
+        self.assistant_dashboard_control = True
+        self.sessions = {}  # token -> {"sid", "kind", "display", "app"}
+        self.tool_calls = []  # {"sid", "mode", "name", "args", "ok", ...} like the hub's audit events
         self.handlers = {}
         self._install = install
         self._server = None
@@ -347,6 +357,63 @@ class FakeBroker:
 
     def revoke_share(self, consumer, provider, name):
         self.share_grants.discard((consumer, provider, name))
+
+    def add_tool(self, tool, fn, *, name=None):
+        """Offer ``tool`` (a :class:`bdh_sdk.tools.Tool`) to assistant sessions.
+
+        ``fn(args)`` runs it with validated arguments; raise
+        :class:`bdh_sdk.tools.ToolError` to fail with a message. ``name`` is
+        what :func:`bdh_sdk.tools.list_tools` shows (default ``tool.id``).
+        """
+        self.assistant_tools[name or tool.id] = (tool, fn)
+
+    def session_mode(self):
+        """The mode the hub gives a voice session now: guest during a stay."""
+        from .plugins import DASHBOARD, GUEST
+        return GUEST if self.stay is not None else DASHBOARD
+
+    def _offered_tools(self, mode):
+        from .plugins import DASHBOARD
+        return {name: (tool, fn) for name, (tool, fn) in self.assistant_tools.items()
+                if mode in tool.modes
+                and (tool.readonly or mode != DASHBOARD or self.assistant_dashboard_control)}
+
+    def _tools(self, op, p):
+        from . import tools
+        if op == "tools.open":
+            if p.get("kind", tools.VOICE) not in tools.KINDS:
+                raise FakeBroker.Error("invalid", f"unknown session kind {p.get('kind')!r}")
+            sid = f"s{len(self.sessions) + 1}"
+            token = f"fake-session-{sid}"
+            self.sessions[token] = {"sid": sid, "kind": p.get("kind", tools.VOICE),
+                                    "display": p.get("display"), "app": self.app_id}
+            return {"token": token, "sid": sid, "mode": self.session_mode(), "expires_in": 900}
+        session = self.sessions.get(p.get("token"))
+        if session is None or session["app"] != self.app_id:
+            raise FakeBroker.Error(tools.BAD_SESSION, "session token is invalid or expired")
+        mode = self.session_mode()
+        offered = self._offered_tools(mode)
+        if op == "tools.list":
+            return {"tools": [{"name": name, "title": tool.title, "description": tool.description,
+                               "parameters": tool.params, "readonly": tool.readonly,
+                               "confirm": tool.confirm}
+                              for name, (tool, _fn) in sorted(offered.items())]}
+        name = p.get("name")
+        record = {"sid": session["sid"], "mode": mode, "name": name, "args": p.get("args")}
+        if name not in offered:
+            answer = {"ok": False, "error": f"no tool {name!r} here"}
+        else:
+            tool, fn = offered[name]
+            try:
+                answer = {"ok": True, "result": fn(tools.validate_args(tool, p.get("args")))}
+            except tools.InvalidArgs as exc:
+                answer = {"ok": False, "error": f"invalid arguments: {exc}"}
+            except tools.ToolError as exc:
+                answer = {"ok": False, "error": str(exc)}
+            except Exception:
+                answer = {"ok": False, "error": "the tool failed"}
+        self.tool_calls.append({**record, **answer})
+        return answer
 
     def start(self):
         import http.server
@@ -431,6 +498,8 @@ class FakeBroker:
             return self._secret(op, p)
         if op.startswith("shares."):
             return self._share(op, p)
+        if op.startswith("tools."):
+            return self._tools(op, p)
         key = (p.get("app"), p.get("key"))
         if op == "settings.get":
             return {"found": key in self.settings, "value": self.settings.get(key)}

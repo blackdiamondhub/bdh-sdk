@@ -260,24 +260,59 @@ def _message(result):
 
 
 HOOKS = ("status", "shortcuts", "stay", "card", "run_shortcut", "run_action",
-         "provide", "setting_options")
+         "provide", "setting_options", "tools", "run_tool")
+
+
+def tools_value(result):
+    from .tools import Tool, tool_dict
+
+    items, seen = [], set()
+    for tool in result or ():
+        if not isinstance(tool, Tool):
+            raise TypeError(f"tools hook returned {type(tool).__name__}")
+        if tool.id in seen:
+            log.warning("Skipping duplicate tool id %r", tool.id)
+            continue
+        seen.add(tool.id)
+        items.append(tool_dict(tool))
+    return items
+
+
+def tool_result(result):
+    """``result`` as JSON for the model; raises TypeError if it can't be."""
+    import json
+
+    if result is None or isinstance(result, str):
+        return result
+    try:
+        return json.loads(json.dumps(result))
+    except (TypeError, ValueError):
+        raise TypeError(f"run_tool returned {type(result).__name__}, not JSON") from None
 
 
 def run(spec, hook, *, mode=None, shortcut_id=None, row_id="", action_id=None,
-        capability=None, key=None):
+        capability=None, key=None, tool_id=None, args=None):
     """Run ``spec``'s ``hook`` and return its JSON-ready result.
 
     Raises :class:`HookNotFound` when the app doesn't have it; anything the
     app raises propagates.
     """
-    if hook in ("status", "shortcuts", "stay", "card"):
+    if hook in ("status", "shortcuts", "stay", "card", "tools"):
         path = getattr(spec, hook)
         if not path:
             raise HookNotFound(hook)
         fn = _resolve(path)
         result = fn(mode=mode) if mode and _takes_mode(fn) else fn()
         return {"status": status_value, "shortcuts": shortcuts_value,
-                "stay": stay_value, "card": card_value}[hook](result)
+                "stay": stay_value, "card": card_value, "tools": tools_value}[hook](result)
+    if hook == "run_tool":
+        if not spec.run_tool:
+            raise HookNotFound(hook)
+        fn = _resolve(spec.run_tool)
+        args = dict(args or {})
+        if _takes_mode(fn):
+            return tool_result(fn(tool_id, args, mode=mode))
+        return tool_result(fn(tool_id, args))
     if hook == "run_shortcut":
         if not spec.run_shortcut:
             raise HookNotFound(hook)

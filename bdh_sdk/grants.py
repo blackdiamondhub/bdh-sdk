@@ -3,7 +3,7 @@
 Grants use the manifest permission grammar (``bdh_sdk.plugins.valid_permission``):
 ``ha.read:<entity glob>``, ``ha.call:<domain>.<service|*>``,
 ``events.publish:<topic pattern>``, ``events.subscribe:<topic pattern>``,
-``alerts``, ``speakers``, ``media``, ``displays.read``, ``stays.read``, plus the admin-only ``ha.ws``.
+``alerts``, ``speakers``, ``media``, ``displays.read``, ``stays.read``, ``tools``, plus the admin-only ``ha.ws``.
 
 The hub broker and :class:`bdh_sdk.testing.FakeBroker` both use these, so an
 app's tests refuse exactly what the hub would.
@@ -17,7 +17,12 @@ SPEAKERS = "speakers"
 MEDIA = "media"
 DISPLAYS_READ = "displays.read"
 STAYS_READ = "stays.read"
+TOOLS = "tools"
 HA_WS = "ha.ws"
+
+# Topics only the hub publishes (the assistant's audit trail), whatever an
+# app is granted or named.
+HUB_TOPICS = frozenset({"assistant"})
 
 
 def _with_prefix(grants, prefix):
@@ -67,8 +72,10 @@ def covers(granted, requested):
 
 def can_publish(grants, app_id, topic):
     try:
-        events._segments(topic, wildcards=False)
+        parts = events._segments(topic, wildcards=False)
     except ValueError:
+        return False
+    if parts[0] in HUB_TOPICS:
         return False
     patterns = [_own(app_id), *_with_prefix(grants, "events.publish:")]
     return any(_safe_match(p, topic) for p in patterns)
