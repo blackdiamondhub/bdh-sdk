@@ -137,6 +137,16 @@ class SpecAndHookTests(unittest.TestCase):
             spec(run_tool=f"{HERE}.demo_run")
         spec(tools=f"{HERE}.demo_tools", run_tool=f"{HERE}.demo_run")
 
+    def test_assistant_opt_out(self):
+        self.assertTrue(spec().assistant)
+        self.assertTrue(spec().manifest()["assistant"])
+        off = spec(assistant=False)
+        self.assertIs(off.manifest()["assistant"], False)
+        with self.assertRaisesRegex(ValueError, "opts out"):
+            spec(assistant=False, tools=f"{HERE}.demo_tools", run_tool=f"{HERE}.demo_run")
+        with self.assertRaises(ValueError):
+            spec(assistant=0)
+
     def test_tools_permission(self):
         from bdh_sdk.plugins import valid_permission
         self.assertTrue(valid_permission("tools"))

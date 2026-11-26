@@ -671,6 +671,12 @@ The hub also offers every app's quick actions and status buttons as tools,
 and a read-only `hub__status` summary of the homepage, in the modes where
 they show on the homepage.
 
+An app that should never be used by the assistant sets
+`PluginSpec(assistant=False)` (it can't also have `tools`): the hub then
+offers none of its tools, quick actions or status buttons to any session
+and leaves it out of `hub__status`. Hubs also have an allowlist of apps the
+assistant may use (Settings → Location → Assistant); the opt-out always wins.
+
 An app with the `tools` permission (the admin must grant it) can run an
 assistant session, e.g. the voice app's language-model loop:
 
