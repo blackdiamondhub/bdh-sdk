@@ -28,6 +28,14 @@ synth raises, the HA engine path above is used instead.
 :func:`tts_audio` returns the spoken message as audio instead, for the hub to
 play on its own screens (see ``Alert.speak`` in :mod:`bdh_sdk.alerts`).
 Needs ``bdh-sdk[ha]``.
+
+On a hub (SDK 0.50+) every call goes through the hub's own speaker layer
+(:func:`set_backend`), which plays on Sonos directly and keeps accepting the
+HA entity ids above. It adds :func:`devices` (each speaker's native id, kind
+and capabilities), :func:`play` (an app's own short clip) and
+``announce(..., detail=True)`` (a result per speaker). :func:`ha_list_speakers`,
+:func:`ha_announce` and :func:`ha_tts_audio` are the Home Assistant path on
+its own, whatever the backend.
 """
 import hashlib
 import logging
@@ -42,8 +50,9 @@ from . import ha
 from .alerts import CHIMES, SILENT
 
 __all__ = [
-    "DEFAULT_TTS", "AnnounceError", "announce", "chime_seconds", "list_speakers", "set_backend", "set_synth",
-    "tts_audio",
+    "DEFAULT_TTS", "FAILED", "MAX_PLAY_BYTES", "MAX_PLAY_SECONDS", "OFFLINE", "PLAYED", "UNSUPPORTED",
+    "AnnounceError", "announce", "canonical", "chime_seconds", "devices", "ha_announce", "ha_list_speakers",
+    "ha_tts_audio", "list_speakers", "play", "set_backend", "set_synth", "tts_audio",
 ]
 
 log = logging.getLogger(__name__)
@@ -68,6 +77,13 @@ _clips = OrderedDict()  # (HA url, sha256 of the audio) -> media id
 
 MAX_TTS_TEXT = 300
 _TTS_CACHE_SIZE = 32
+
+# A speaker's result in announce(..., detail=True) and play(..., detail=True).
+PLAYED, FAILED, UNSUPPORTED, OFFLINE = "played", "failed", "unsupported", "offline"
+
+# speakers.play limits (the hub checks them too).
+MAX_PLAY_BYTES = 2 * 1024 * 1024
+MAX_PLAY_SECONDS = 60
 _tts_cache = OrderedDict()
 _tts_lock = threading.Lock()
 
@@ -80,9 +96,16 @@ _backend = None
 
 
 def set_backend(backend):
-    """Route ``list_speakers``, ``announce`` and ``tts_audio`` through
-    ``backend`` (the hub broker, for apps in their own container).
-    ``None`` restores direct Home Assistant calls."""
+    """Route ``list_speakers``, ``announce``, ``tts_audio``, ``devices`` and
+    ``play`` through ``backend`` (the hub broker for apps in their own
+    container, the hub's speaker layer in the hub). ``None`` restores direct
+    Home Assistant calls.
+
+    A backend has ``list_speakers()``, ``announce(message, speakers, volume,
+    chime, tts_engine, voice)`` and ``tts_audio(message, tts_engine, voice)``;
+    ``devices()``, ``play(audio, speakers, volume, night, detail)`` and
+    ``announce(..., detail=True)`` are optional (SDK 0.50+): ``detail`` is
+    only passed when a caller asks for it."""
     global _backend
     _backend = backend
 
@@ -132,9 +155,17 @@ def _registry():
 
 
 def list_speakers():
-    """Sonos and Alexa speakers as ``(entity_id, "Name (Sonos)")`` pairs, by name."""
+    """Speakers as ``(id, "Name (Sonos)")`` pairs, by name.
+
+    Directly from HA these are the Sonos and Alexa entity ids; on a hub the
+    HA entity id whenever the speaker has one, else the hub's native id."""
     if _backend is not None:
         return _backend.list_speakers()
+    return ha_list_speakers()
+
+
+def _ha_speakers():
+    """``[(entity_id, platform, name, online)]`` for HA's Sonos and Alexa speakers."""
     platforms = _registry()
     states = {s["entity_id"]: s for s in ha.get_all_states() if s["entity_id"] in platforms}
     out = []
@@ -143,11 +174,70 @@ def list_speakers():
         if state is None:
             continue
         name = state.get("attributes", {}).get("friendly_name") or eid.split(".", 1)[1]
+        out.append((eid, platform, name, state.get("state") != "unavailable"))
+    return out
+
+
+def ha_list_speakers():
+    """:func:`list_speakers` straight from Home Assistant, ignoring any backend."""
+    out = []
+    for eid, platform, name, online in _ha_speakers():
         label = f"{name} ({_PLATFORMS[platform]})"
-        if state.get("state") == "unavailable":
+        if not online:
             label += " - offline"
         out.append((eid, label))
     return sorted(out, key=lambda p: p[1].lower())
+
+
+def devices():
+    """Every speaker with what it can do, by name.
+
+    Dicts with ``id`` (the hub's native id, e.g. ``sonos:RINCON_...``),
+    ``legacy_id`` (the HA entity id it is also known by, or ``None``),
+    ``name``, ``kind`` (``sonos``, ``alexa``, ``ha`` ...), ``caps``
+    (``{"audio", "duck", "text", "volume"}`` booleans: plays audio clips,
+    ducks the music, speaks text itself, takes a volume) and ``online``.
+    Both ids work everywhere a speaker id is taken.
+    """
+    if _backend is not None:
+        fn = getattr(_backend, "devices", None)
+        if fn is not None:
+            return fn()
+        return [_from_pair(i, label) for i, label in _backend.list_speakers()]
+    out = []
+    for eid, platform, name, online in _ha_speakers():
+        sonos = platform == SONOS
+        out.append({"id": eid, "legacy_id": None, "name": name, "kind": "sonos" if sonos else "alexa",
+                    "caps": {"audio": sonos, "duck": sonos, "text": not sonos, "volume": sonos},
+                    "online": online})
+    return sorted(out, key=lambda d: d["name"].lower())
+
+
+def _from_pair(speaker_id, label):
+    """A :func:`devices` entry from a ``list_speakers`` pair (a hub without ``devices``)."""
+    online = not label.endswith(" - offline")
+    name = label[:-len(" - offline")] if not online else label
+    kind = "unknown"
+    for platform, title in _PLATFORMS.items():
+        if name.endswith(f" ({title})"):
+            name, kind = name[:-len(title) - 3], "sonos" if platform == SONOS else "alexa"
+    sonos = kind == "sonos"
+    return {"id": speaker_id, "legacy_id": None, "name": name, "kind": kind,
+            "caps": {"audio": sonos, "duck": sonos, "text": kind == "alexa", "volume": sonos},
+            "online": online}
+
+
+def canonical(ids):
+    """``ids`` with each speaker's HA entity id swapped for its native id.
+
+    For apps converting saved picks: ids the hub doesn't know (or already
+    native) come back unchanged, in order, without duplicates."""
+    by_alias = {}
+    for d in devices():
+        by_alias[d["id"]] = d["id"]
+        if d.get("legacy_id"):
+            by_alias.setdefault(d["legacy_id"], d["id"])
+    return list(dict.fromkeys(by_alias.get(i, i) for i in ids))
 
 
 def _chime_file(chime):
@@ -229,8 +319,8 @@ def _play(entity_ids, media_id, volume):
     return ha.call_service("media_player", "play_media", entity_ids, extra)
 
 
-def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS, voice=None):
-    """Speak ``message`` on ``speakers`` (entity ids from :func:`list_speakers`).
+def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS, voice=None, *, detail=False):
+    """Speak ``message`` on ``speakers`` (ids from :func:`list_speakers` or :func:`devices`).
 
     ``volume`` (0-100) applies to Sonos only; ``None`` keeps each speaker's
     own. ``chime`` is a name from :data:`~bdh_sdk.alerts.CHIMES`, or ``None``
@@ -238,11 +328,52 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
     synth (see :func:`set_synth`) and to the TTS engine when it's Home
     Assistant Cloud (e.g. ``"AvaNeural"``).
 
-    Blocks until the message has been sent. Returns the entity ids that
-    failed; raises AnnounceError if every speaker failed.
+    Blocks until the message has been sent. Returns the ids that failed;
+    raises AnnounceError if every speaker failed. With ``detail=True`` it
+    returns ``{id: "played" | "failed" | "unsupported" | "offline"}`` instead
+    and doesn't raise when speakers fail (SDK 0.50+; a hub from before
+    answers with the failed list, turned into ``played``/``failed``).
     """
     if _backend is not None:
-        return _backend.announce(message, speakers, volume, chime, tts_engine, voice)
+        if not detail:
+            return _backend.announce(message, speakers, volume, chime, tts_engine, voice)
+        result = _backend.announce(message, speakers, volume, chime, tts_engine, voice, detail=True)
+        if isinstance(result, list):
+            return {s: FAILED if s in result else PLAYED for s in dict.fromkeys(speakers)}
+        return result
+    return ha_announce(message, speakers, volume, chime, tts_engine, voice, detail=detail)
+
+
+def play(audio, speakers, volume=None, *, night=False, detail=False):
+    """Play ``audio`` (MP3 or WAV bytes, at most 2 MB and 60 s) on ``speakers``.
+
+    Only speakers that play clips do (``caps["audio"]``); text-only ones
+    (Alexa) are ``unsupported``. Sonos ducks the music and resumes it. The
+    hub caps ``volume`` at its maximum and refuses during the display's
+    night hours unless ``night=True``. Needs the hub (SDK 0.50+): directly
+    against Home Assistant it raises AnnounceError.
+
+    Returns the ids that failed (raises AnnounceError if all did), or with
+    ``detail=True`` ``{id: "played" | "failed" | "unsupported" | "offline"}``.
+    """
+    if not isinstance(audio, (bytes, bytearray)) or not audio:
+        raise ValueError("audio must be bytes")
+    if len(audio) > MAX_PLAY_BYTES:
+        raise ValueError(f"audio must be at most {MAX_PLAY_BYTES // (1024 * 1024)} MB")
+    if volume is not None and not 0 <= int(volume) <= 100:
+        raise ValueError("volume must be 0-100")
+    speakers = list(dict.fromkeys(speakers))
+    if not speakers:
+        raise AnnounceError("no speakers picked")
+    fn = getattr(_backend, "play", None)
+    if fn is None:
+        raise AnnounceError("playing clips needs the hub's speakers (bdh-sdk 0.50 on the hub)")
+    return fn(bytes(audio), speakers, volume, night=bool(night), detail=bool(detail))
+
+
+def ha_announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS, voice=None, *,
+                detail=False):
+    """:func:`announce` straight through Home Assistant, ignoring any backend."""
     if not message or not message.strip():
         raise ValueError("message is required")
     if chime not in (None, SILENT) and chime not in CHIMES:
@@ -299,6 +430,8 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
                 log.warning("Sonos announce failed: %s", err)
                 failed += sonos
 
+    if detail:
+        return {s: FAILED if s in failed else PLAYED for s in speakers}
     if failed and len(failed) == len(speakers):
         raise AnnounceError("announcement failed on every speaker")
     return failed
@@ -315,6 +448,11 @@ def tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
     """
     if _backend is not None:
         return _backend.tts_audio(message, tts_engine, voice)
+    return ha_tts_audio(message, tts_engine, voice)
+
+
+def ha_tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
+    """:func:`tts_audio` from the synth or Home Assistant, ignoring any backend."""
     message = (message or "").strip()
     if not message:
         raise ValueError("message is required")
