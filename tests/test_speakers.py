@@ -159,3 +159,77 @@ class TtsAudioTests(unittest.TestCase):
             with self.assertRaises(ha.HAError):
                 speakers.tts_audio("hi")
         self.assertEqual(get_tts.call_count, 2)
+
+@mock.patch("bdh_sdk.speakers.time.sleep")
+@mock.patch("bdh_sdk.ha.ws_commands", return_value=[REGISTRY])
+class SynthTests(unittest.TestCase):
+    AUDIO = (b"ID3-dinner", "audio/mpeg")
+
+    def setUp(self):
+        speakers._uploaded.clear()
+        speakers._clips.clear()
+        speakers._tts_cache.clear()
+        for target, value in (("bdh_sdk.speakers._tts_engines", ENGINES), ("bdh_sdk.ha._base_url", "http://ha:8123")):
+            patcher = mock.patch(target, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.synth = mock.Mock(return_value=self.AUDIO)
+        speakers.set_synth(self.synth)
+        self.addCleanup(speakers.set_synth, None)
+
+    @mock.patch("bdh_sdk.ha.upload_media", side_effect=lambda folder, name, data, ctype:
+                f"media-source://media_source/local/{folder}/{name}")
+    @mock.patch("bdh_sdk.ha.call_service", return_value=(True, None))
+    def test_sonos_plays_uploaded_clip(self, call, upload, _ws, _sleep):
+        for _ in range(2):
+            speakers.announce("Dinner", ["media_player.kitchen", "media_player.kids_echo_2"],
+                              volume=30, chime="notify", voice="AvaNeural")
+        self.synth.assert_called_with("Dinner", "AvaNeural")
+        clips = [c for c in upload.call_args_list if c.args[0] == speakers.CLIP_FOLDER]
+        self.assertEqual(len(clips), 1)  # uploaded once, reused the second time
+        folder, name, data, ctype = clips[0].args
+        self.assertRegex(name, r"^[0-9a-f]{64}\.mp3$")
+        self.assertEqual((data, ctype), self.AUDIO)
+        notify, chime, speech = call.call_args_list[:3]
+        self.assertEqual(notify.args[:2], ("notify", "alexa_media"))  # Alexa keeps its own TTS
+        self.assertEqual(notify.args[3]["message"], "Dinner")
+        self.assertTrue(chime.args[3]["media_content_id"].endswith("notify.wav"))
+        self.assertEqual(speech.args[:3], ("media_player", "play_media", ["media_player.kitchen"]))
+        self.assertEqual(speech.args[3]["media_content_id"], f"media-source://media_source/local/bdh-tts/{name}")
+        self.assertTrue(speech.args[3]["announce"])
+        self.assertEqual(speech.args[3]["extra"], {"volume": 30})
+
+    @mock.patch("bdh_sdk.ha.call_service", return_value=(True, None))
+    def test_synth_failure_uses_ha_engine(self, call, _ws, _sleep):
+        self.synth.side_effect = RuntimeError("engines down")
+        with self.assertLogs("bdh_sdk.speakers", "WARNING"):
+            self.assertEqual(speakers.announce("hi", ["media_player.kitchen"]), [])
+        self.assertEqual(call.call_args.args[3]["media_content_id"],
+                         "media-source://tts/tts.google_translate_en_com?message=hi")
+
+    @mock.patch("bdh_sdk.ha.upload_media", side_effect=ha.HAError("403"))
+    @mock.patch("bdh_sdk.ha.call_service", return_value=(True, None))
+    def test_upload_failure_uses_ha_engine(self, call, _upload, _ws, _sleep):
+        speakers.announce("hi", ["media_player.kitchen"])
+        self.assertEqual(call.call_args.args[3]["media_content_id"],
+                         "media-source://tts/tts.google_translate_en_com?message=hi")
+
+    @mock.patch("bdh_sdk.ha.upload_media", return_value="media-source://media_source/local/bdh-tts/x.mp3")
+    @mock.patch("bdh_sdk.ha.call_service", side_effect=[(False, "500"), (True, None)])
+    def test_clip_play_failure_retries_with_ha_engine(self, call, _upload, _ws, _sleep):
+        self.assertEqual(speakers.announce("hi", ["media_player.kitchen"]), [])
+        first, second = call.call_args_list
+        self.assertTrue(first.args[3]["media_content_id"].endswith("x.mp3"))
+        self.assertTrue(second.args[3]["media_content_id"].startswith("media-source://tts/"))
+
+    @mock.patch("bdh_sdk.ha.get_tts")
+    def test_tts_audio_uses_synth(self, get_tts, _ws, _sleep):
+        self.assertEqual(speakers.tts_audio(" Egg timer ", voice="AvaNeural"), self.AUDIO)
+        self.synth.assert_called_once_with("Egg timer", "AvaNeural")
+        get_tts.assert_not_called()
+
+    @mock.patch("bdh_sdk.ha.get_tts", return_value=(b"HA", "audio/mpeg"))
+    def test_tts_audio_falls_back_to_ha(self, get_tts, _ws, _sleep):
+        self.synth.side_effect = RuntimeError("down")
+        self.assertEqual(speakers.tts_audio("hi"), (b"HA", "audio/mpeg"))
+        get_tts.assert_called_once()
