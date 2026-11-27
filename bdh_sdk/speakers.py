@@ -12,6 +12,13 @@ own tone, so they get no chime and keep their own volume.
 
 Announcements are serialized so two at once don't talk over each other.
 
+The spoken text comes from one of HA's TTS engines. By default
+(``tts_engine=None``) the first Google engine HA has is used (free, no
+account), then Home Assistant Cloud, then any other. A requested engine that
+HA doesn't have (e.g. Nabu Casa signed out) falls back to that default
+instead of failing. ``voice`` only applies to Home Assistant Cloud and is
+dropped for other engines.
+
 :func:`tts_audio` returns the spoken message as audio instead, for the hub to
 play on its own screens (see ``Alert.speak`` in :mod:`bdh_sdk.alerts`).
 Needs ``bdh-sdk[ha]``.
@@ -31,7 +38,10 @@ __all__ = ["DEFAULT_TTS", "AnnounceError", "announce", "chime_seconds", "list_sp
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TTS = "tts.home_assistant_cloud"
+DEFAULT_TTS = None
+HA_CLOUD_TTS = "tts.home_assistant_cloud"
+_ENGINES_TTL = 300
+_engines = {"at": 0.0, "ids": []}
 CHIME_FOLDER = "bdh-chimes"
 
 SONOS = "sonos"
@@ -110,9 +120,38 @@ def _chime_media_id(chime):
     return _uploaded[chime]
 
 
+def _tts_engines():
+    """HA's TTS entity ids, refreshed every few minutes."""
+    now = time.monotonic()
+    if not _engines["ids"] or now - _engines["at"] > _ENGINES_TTL:
+        ids = sorted(s["entity_id"] for s in ha.get_all_states() if s.get("entity_id", "").startswith("tts."))
+        _engines.update(at=now, ids=ids)
+    return _engines["ids"]
+
+
+def _engine(requested):
+    """The engine to use: ``requested`` if HA has it, else Google, HA Cloud, any."""
+    try:
+        ids = _tts_engines()
+    except ha.HAError:
+        return requested or HA_CLOUD_TTS
+    if requested in ids:
+        return requested
+    for pick in [i for i in ids if i.startswith("tts.google")] + [HA_CLOUD_TTS] + ids:
+        if pick in ids:
+            if requested:
+                log.warning("TTS engine %s not in HA, using %s", requested, pick)
+            return pick
+    return requested or HA_CLOUD_TTS
+
+
+def _voice_options(engine, voice):
+    return {"voice": voice} if voice and engine == HA_CLOUD_TTS else None
+
+
 def _tts_media_id(message, engine, voice):
     uri = f"media-source://tts/{engine}?message={quote(message)}"
-    if voice:
+    if _voice_options(engine, voice):
         uri += f"&voice={quote(voice)}"
     return uri
 
@@ -130,7 +169,7 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
     ``volume`` (0-100) applies to Sonos only; ``None`` keeps each speaker's
     own. ``chime`` is a name from :data:`~bdh_sdk.alerts.CHIMES`, or ``None``
     or :data:`~bdh_sdk.alerts.SILENT` for none. ``voice`` is passed to the TTS
-    engine (e.g. ``"AvaNeural"`` for Home Assistant Cloud).
+    engine when it's Home Assistant Cloud (e.g. ``"AvaNeural"``).
 
     Blocks until the message has been sent. Returns the entity ids that
     failed; raises AnnounceError if every speaker failed.
@@ -174,7 +213,7 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
                         log.warning("chime failed: %s", err)
                 except ha.HAError as exc:
                     log.warning("chime upload failed: %s", exc)
-            ok, err = _play(sonos, _tts_media_id(message, tts_engine, voice), volume)
+            ok, err = _play(sonos, _tts_media_id(message, _engine(tts_engine), voice), volume)
             if not ok:
                 log.warning("Sonos announce failed: %s", err)
                 failed += sonos
@@ -198,6 +237,8 @@ def tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
         raise ValueError("message is required")
     if len(message) > MAX_TTS_TEXT:
         raise ValueError(f"message must be at most {MAX_TTS_TEXT} characters")
+    tts_engine = _engine(tts_engine)
+    voice = voice if _voice_options(tts_engine, voice) else None
     key = (message, tts_engine, voice or "")
     with _tts_lock:
         if key in _tts_cache:

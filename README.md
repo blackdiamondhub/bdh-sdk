@@ -572,6 +572,10 @@ and sends Alexa devices an announcement, which has its own tone. It blocks
 until done, returns the speakers that failed and raises
 `speakers.AnnounceError` if all of them did. Announcements never overlap.
 
+The speech uses HA's first Google TTS engine (free, no account) unless
+`tts_engine=` names another one HA has. A missing engine (e.g. Nabu Casa
+signed out) falls back to Google. `voice` only applies to Home Assistant Cloud.
+
 `tts_audio(message, voice=None)` returns `(audio bytes, content type)` of HA
 speaking the message (at most 300 characters), cached for repeats. The hub uses
 it to speak alerts on its own screens (`Alert.speak`); it raises `ha.HAError`
