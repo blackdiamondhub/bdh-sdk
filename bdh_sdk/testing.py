@@ -2,6 +2,7 @@
 
 Nothing here imports Django at module import time.
 """
+import base64
 import json
 import os
 import subprocess
@@ -209,7 +210,9 @@ PERMISSION_RULES = {
     "ha.instances": _read_any,
     "ha.registry": _read_any,
     "speakers.list": _require("speakers"),
+    "speakers.devices": _require("speakers"),
     "speakers.announce": _require("speakers"),
+    "speakers.play": _require("speakers"),
     "speakers.tts": _require("speakers"),
     "hub.brand": _anyone,
     "displays.status": _require("displays.read"),
@@ -253,7 +256,12 @@ class FakeBroker:
     :attr:`app_id` as the caller (set it to act as another app): declare
     shares with :meth:`set_manifest_shares`, grant them with
     :meth:`grant_share` / :meth:`revoke_share`; notifications land in
-    :attr:`share_events` as ``(recipient, topic, payload)``. It runs the
+    :attr:`share_events` as ``(recipient, topic, payload)``. It answers
+    ``speakers.list`` / ``devices`` / ``announce`` / ``play`` from
+    :attr:`speakers` (``speakers.devices`` dicts: ``id``, ``legacy_id``,
+    ``name``, ``kind``, ``caps``, ``online``) with the hub's per-speaker
+    results (unknown ids fail, offline ones are ``offline``, a clip on a
+    speaker without ``caps["audio"]`` is ``unsupported``). It runs the
     ``tools.*`` ops (assistant sessions) over tools added with
     :meth:`add_tool`, in the mode the hub would pick (:meth:`session_mode`),
     and records each call in :attr:`tool_calls`. Anything else answers ``None`` unless a
@@ -284,6 +292,7 @@ class FakeBroker:
         self.instances = [dict(DEFAULT_INSTANCE)]
         self.registries = {}
         self.ha_states = {}
+        self.speakers = []  # speakers.devices entries (dicts); speakers.list/announce/play use them
         self.registry = {"entities": [], "devices": [], "areas": [], "unit_system": {}}
         self.share_manifests = {}  # app_id -> [{"name", "type", "title"}]
         self.share_blobs = {}  # (owner, sha256) -> {"mime", "size", "data"}
@@ -513,6 +522,8 @@ class FakeBroker:
             return sorted(k for a, k in self.state if a == p.get("app"))
         elif op == "ha.instances":
             return [dict(i) for i in self.instances]
+        elif op in ("speakers.list", "speakers.devices", "speakers.announce", "speakers.play"):
+            return self._speakers(op, p)
         elif op == "displays.status":
             return self._displays()
         elif op == "stays.current":
@@ -536,6 +547,59 @@ class FakeBroker:
     def _states(self, p):
         """The instance's :attr:`ha_states`, or None when the test set none."""
         return self.ha_states.get(self._instance(p))
+
+    def _speakers(self, op, p):
+        """``speakers.*`` from :attr:`speakers`, the way the hub answers them."""
+        from . import speakers as sdk
+
+        if op == "speakers.devices":
+            return [dict(d) for d in self.speakers]
+        if op == "speakers.list":
+            titles = {"sonos": "Sonos", "alexa": "Alexa", "ha": "Home Assistant"}
+            out = []
+            for d in self.speakers:
+                label = f"{d['name']} ({titles.get(d.get('kind'), d.get('kind'))})"
+                if not d.get("online", True):
+                    label += " - offline"
+                out.append([d.get("legacy_id") or d["id"], label])
+            return sorted(out, key=lambda pair: pair[1].lower())
+        ids = p.get("speakers")
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise FakeBroker.Error("invalid", "speakers must be a list of strings")
+        if op == "speakers.play":
+            try:
+                audio = base64.b64decode(p.get("audio") or "", validate=True)
+            except (ValueError, TypeError):
+                raise FakeBroker.Error("invalid", "audio must be base64") from None
+            if not audio:
+                raise FakeBroker.Error("invalid", "audio is required")
+            if len(audio) > sdk.MAX_PLAY_BYTES:
+                raise FakeBroker.Error("too_large", "audio is over 2 MB", 413)
+        elif not str(p.get("message") or "").strip():
+            raise FakeBroker.Error("invalid", "message is required")
+        known = {}
+        for d in self.speakers:
+            known[d["id"]] = d
+            if d.get("legacy_id"):
+                known.setdefault(d["legacy_id"], d)
+        result = {}
+        for i in dict.fromkeys(ids):
+            d = known.get(i)
+            caps = (d or {}).get("caps") or {}
+            if d is None:
+                result[i] = sdk.FAILED
+            elif not d.get("online", True):
+                result[i] = sdk.OFFLINE
+            elif not (caps.get("audio") or (op == "speakers.announce" and caps.get("text"))):
+                result[i] = sdk.UNSUPPORTED
+            else:
+                result[i] = sdk.PLAYED
+        if p.get("detail"):
+            return result
+        failed = [i for i, status in result.items() if status != sdk.PLAYED]
+        if result and len(failed) == len(result):
+            raise FakeBroker.Error("announce_error", "failed on every speaker", 500)
+        return failed
 
     def _displays(self):
         now = _utcnow()

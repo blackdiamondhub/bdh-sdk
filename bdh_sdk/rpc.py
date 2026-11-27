@@ -49,7 +49,8 @@ APP_ENV = "BDH_APP_ID"
 _READ_OPS = frozenset({
     "settings.get", "state.get", "state.keys", "hub.brand",
     "ha.get_entity_state", "ha.get_entity_states", "ha.get_history",
-    "ha.get_all_states", "ha.get_static", "ha.instances", "ha.registry", "speakers.list", "secrets.get",
+    "ha.get_all_states", "ha.get_static", "ha.instances", "ha.registry", "speakers.list", "speakers.devices",
+    "secrets.get",
     "displays.status", "stays.current", "tools.list",
 })
 _RETRY_STATUS = frozenset({502, 503, 504})
@@ -495,12 +496,41 @@ class SpeakersBackend:
     def list_speakers(self):
         return [tuple(pair) for pair in self._call("list") or []]
 
-    def announce(self, message, speakers, volume=None, chime=None, tts_engine=None, voice=None):
+    def devices(self):
+        from . import speakers
+        try:
+            return self._call("devices") or []
+        except BrokerError as exc:
+            if exc.code not in ("unknown_op", "not_found"):
+                raise
+        # A hub from before SDK 0.50 only has the (id, label) list.
+        return [speakers._from_pair(i, label) for i, label in self.list_speakers()]
+
+    def announce(self, message, speakers, volume=None, chime=None, tts_engine=None, voice=None, detail=False):
         payload = {"message": message, "speakers": list(speakers), "volume": volume,
                    "chime": chime, "voice": voice}
         if tts_engine is not None:
             payload["tts_engine"] = tts_engine
-        return self._call("announce", payload, timeout=120) or []
+        if detail:
+            payload["detail"] = True
+        result = self._call("announce", payload, timeout=120)
+        if detail:
+            return result if isinstance(result, (dict, list)) else {}
+        return result or []
+
+    def play(self, audio, speakers, volume=None, night=False, detail=False):
+        payload = {"audio": _b64(audio), "speakers": list(speakers), "volume": volume,
+                   "night": bool(night), "detail": bool(detail)}
+        try:
+            result = self._call("play", payload, timeout=120)
+        except BrokerError as exc:
+            if exc.code in ("unknown_op", "not_found"):
+                from . import speakers as sdk_speakers
+                raise sdk_speakers.AnnounceError("this hub can't play clips (needs bdh-sdk 0.50)") from None
+            raise
+        if detail:
+            return result if isinstance(result, dict) else {}
+        return result or []
 
     def tts_audio(self, message, tts_engine=None, voice=None):
         payload = {"message": message, "voice": voice}

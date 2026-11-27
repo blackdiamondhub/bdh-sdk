@@ -592,6 +592,46 @@ path above is used. Alexa is unchanged (it speaks the text itself), and with
 no synth the behaviour is the same as before. The hub's synth (Settings →
 Speech) uses its house voice; an app's `voice` is only a hint.
 
+### Hub speakers (SDK 0.50+)
+
+On a hub with SDK 0.50 the hub plays announcements itself: Sonos directly
+(its audio-clip API, so the music ducks and resumes), Alexa and other Home
+Assistant speakers through HA. Nothing changes for an app: `list_speakers()`
+still returns the HA entity ids whenever a speaker has one, and the hub
+accepts them forever, next to its own native ids (`sonos:<RINCON uid>`,
+`alexa:<instance>:<entity_id>`, `ha:<instance>:<entity_id>`).
+
+```python
+from bdh_sdk import speakers
+
+for d in speakers.devices():
+    print(d["id"], d["legacy_id"], d["name"], d["kind"], d["caps"], d["online"])
+
+speakers.announce("Dinner's ready", ["media_player.kitchen"], detail=True)
+# {"media_player.kitchen": "played"}   (or "failed" / "unsupported" / "offline")
+
+speakers.play(open("doorbell.mp3", "rb").read(), ["sonos:RINCON_000E58A0B1C201400"], volume=40)
+speakers.canonical(["media_player.kitchen"])   # ["sonos:RINCON_..."]
+```
+
+- `devices()` lists every speaker: `id`, `legacy_id` (its HA entity id or
+  `None`), `name`, `kind`, `caps` (`audio`, `duck`, `text`, `volume`) and
+  `online`. Against a hub from before 0.50 it is built from `list_speakers()`.
+- `announce(..., detail=True)` returns a result per id instead of the failed
+  list, and doesn't raise when speakers fail.
+- `play(audio, speakers, volume=None, night=False, detail=False)` plays an
+  app's own MP3 or WAV clip (at most 2 MB and 60 s) on speakers with
+  `caps["audio"]`; text-only ones are `unsupported`. The hub caps the volume
+  at its maximum (Settings → Speech) and refuses during the display's night
+  hours unless `night=True`. Rate-limited like `announce`; needs the
+  `speakers` permission.
+- `canonical(ids)` swaps HA entity ids for native ids, for apps converting
+  their saved picks.
+- `ha_list_speakers()`, `ha_announce()` and `ha_tts_audio()` are the direct
+  Home Assistant path whatever the backend (the hub uses them as fallbacks).
+- `FakeBroker.speakers` (a list of `devices()` entries) answers all four ops
+  in app tests the way the hub does.
+
 ## Displays
 
 `bdh_sdk.displays.status()` (needs the `displays.read` permission, container

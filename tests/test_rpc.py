@@ -185,6 +185,70 @@ class InstalledTests(unittest.TestCase):
         with self.assertRaises(speakers.AnnounceError):
             speakers.announce("hello", ["media_player.k"])
 
+    SPEAKERS = [
+        {"id": "sonos:RINCON_A", "legacy_id": "media_player.kitchen", "name": "Kitchen", "kind": "sonos",
+         "caps": {"audio": True, "duck": True, "text": False, "volume": True}, "online": True},
+        {"id": "alexa:ha:media_player.echo", "legacy_id": "media_player.echo", "name": "Echo", "kind": "alexa",
+         "caps": {"audio": False, "duck": False, "text": True, "volume": False}, "online": True},
+        {"id": "sonos:RINCON_B", "legacy_id": None, "name": "Deck", "kind": "sonos",
+         "caps": {"audio": True, "duck": True, "text": False, "volume": True}, "online": False},
+    ]
+
+    def test_fake_broker_speaker_ops(self):
+        self.broker.speakers = self.SPEAKERS
+        self.assertEqual(speakers.list_speakers(), [
+            ("sonos:RINCON_B", "Deck (Sonos) - offline"), ("media_player.echo", "Echo (Alexa)"),
+            ("media_player.kitchen", "Kitchen (Sonos)")])
+        self.assertEqual([d["id"] for d in speakers.devices()], [d["id"] for d in self.SPEAKERS])
+        self.assertEqual(speakers.canonical(["media_player.kitchen", "sonos:RINCON_A", "media_player.gone"]),
+                         ["sonos:RINCON_A", "media_player.gone"])
+        self.assertEqual(
+            speakers.announce("hi", ["media_player.kitchen", "media_player.echo", "sonos:RINCON_B", "x"],
+                              detail=True),
+            {"media_player.kitchen": "played", "media_player.echo": "played", "sonos:RINCON_B": "offline",
+             "x": "failed"})
+        self.assertEqual(speakers.announce("hi", ["media_player.kitchen", "x"]), ["x"])
+        self.assertEqual(speakers.play(b"ID3abc", ["sonos:RINCON_A", "media_player.echo"], volume=30, detail=True),
+                         {"sonos:RINCON_A": "played", "media_player.echo": "unsupported"})
+        sent = self.broker.ops("speakers.play")[0]
+        self.assertEqual((sent["audio"], sent["volume"], sent["night"]), ("SUQzYWJj", 30, False))
+        with self.assertRaises(speakers.AnnounceError):
+            speakers.play(b"ID3abc", ["media_player.echo"])
+
+    def test_speaker_ops_need_the_speakers_permission(self):
+        self.broker.permissions = ["alerts"]
+        for call in (speakers.devices, lambda: speakers.play(b"ID3", ["sonos:RINCON_A"])):
+            with self.assertRaises(rpc.PermissionDenied):
+                call()
+        self.broker.permissions = ["speakers"]
+        self.broker.speakers = self.SPEAKERS
+        self.assertEqual(speakers.play(b"ID3", ["sonos:RINCON_A"]), [])
+
+    def test_play_checks_size_before_sending(self):
+        with self.assertRaises(ValueError):
+            speakers.play(b"x" * (speakers.MAX_PLAY_BYTES + 1), ["sonos:RINCON_A"])
+        with self.assertRaises(ValueError):
+            speakers.play(b"ID3", ["sonos:RINCON_A"], volume=101)
+        self.assertEqual(self.broker.ops("speakers.play"), [])
+
+    def test_older_hub_without_devices_or_detail(self):
+        def gone(payload):
+            raise FakeBroker.Error("unknown_op", "no op", 404)
+        self.broker.on("speakers.devices", gone)
+        self.broker.on("speakers.play", gone)
+        self.broker.on("speakers.list", lambda p: [["media_player.k", "Kitchen (Sonos)"],
+                                                   ["media_player.e", "Echo (Alexa) - offline"]])
+        self.broker.on("speakers.announce", lambda p: ["media_player.e"])  # ignores detail
+        self.assertEqual(speakers.devices(), [
+            {"id": "media_player.k", "legacy_id": None, "name": "Kitchen", "kind": "sonos",
+             "caps": {"audio": True, "duck": True, "text": False, "volume": True}, "online": True},
+            {"id": "media_player.e", "legacy_id": None, "name": "Echo", "kind": "alexa",
+             "caps": {"audio": False, "duck": False, "text": True, "volume": False}, "online": False}])
+        self.assertEqual(speakers.announce("hi", ["media_player.k", "media_player.e"], detail=True),
+                         {"media_player.k": "played", "media_player.e": "failed"})
+        with self.assertRaises(speakers.AnnounceError):
+            speakers.play(b"ID3", ["media_player.k"])
+
     def test_displays_status(self):
         now = datetime.now(timezone.utc)
         self.broker.heartbeats = {"192.168.1.99": now - timedelta(seconds=90)}

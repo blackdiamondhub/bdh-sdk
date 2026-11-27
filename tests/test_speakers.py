@@ -106,6 +106,51 @@ class SpeakerTests(unittest.TestCase):
         with self.assertRaises(speakers.AnnounceError):
             speakers.announce("hi", [])
 
+    @mock.patch("bdh_sdk.ha.call_service", return_value=(True, None))
+    def test_detail_reports_each_speaker(self, _call, _ws, _sleep):
+        self.assertEqual(
+            speakers.announce("hi", ["media_player.kitchen", "media_player.gone"], chime=alerts.SILENT,
+                              detail=True),
+            {"media_player.kitchen": "played", "media_player.gone": "failed"})
+
+    @mock.patch("bdh_sdk.ha.get_all_states", return_value=STATES)
+    def test_devices_and_play_without_a_hub(self, _states, _ws, _sleep):
+        self.assertEqual([(d["id"], d["kind"], d["caps"]["audio"], d["online"]) for d in speakers.devices()], [
+            ("media_player.kids_echo_2", "alexa", False, False),
+            ("media_player.kitchen", "sonos", True, True)])
+        self.assertEqual(speakers.canonical(["media_player.kitchen"]), ["media_player.kitchen"])
+        with self.assertRaises(speakers.AnnounceError):
+            speakers.play(b"ID3", ["media_player.kitchen"])
+
+
+class BackendDispatchTests(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(speakers.set_backend, None)
+
+    def test_detail_only_passed_when_asked(self):
+        class Old:  # a backend from before SDK 0.50
+            def announce(self, message, ids, volume, chime, tts_engine, voice):
+                return ["b"]
+
+            def list_speakers(self):
+                return [("a", "A (Sonos)")]
+
+        speakers.set_backend(Old())
+        self.assertEqual(speakers.announce("hi", ["a", "b"]), ["b"])
+        self.assertEqual(speakers.devices()[0]["id"], "a")
+        with self.assertRaises(speakers.AnnounceError):
+            speakers.play(b"ID3", ["a"])
+
+    def test_new_backend_gets_detail_and_play(self):
+        backend = mock.Mock()
+        backend.announce.return_value = {"a": "played"}
+        backend.play.return_value = {"a": "offline"}
+        speakers.set_backend(backend)
+        self.assertEqual(speakers.announce("hi", ["a"], detail=True), {"a": "played"})
+        self.assertTrue(backend.announce.call_args.kwargs["detail"])
+        self.assertEqual(speakers.play(bytearray(b"ID3"), ["a", "a"], 20, night=True, detail=True), {"a": "offline"})
+        backend.play.assert_called_once_with(b"ID3", ["a"], 20, night=True, detail=True)
+
 
 if __name__ == "__main__":
     unittest.main()
