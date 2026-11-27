@@ -581,6 +581,17 @@ speaking the message (at most 300 characters), cached for repeats. The hub uses
 it to speak alerts on its own screens (`Alert.speak`); it raises `ha.HAError`
 when HA can't make it.
 
+The hub can make the speech itself (SDK 0.49+): `speakers.set_synth(fn)`
+installs `fn(message, voice) -> (audio bytes, content type)` (or `None`
+to let HA's engine speak). With a synth
+set, Sonos plays its audio (uploaded once per clip to HA's local media as
+`bdh-tts/<sha256>.mp3`, still as an announcement, so the music ducks and
+resumes) and `tts_audio` returns it; the synth does its own caching. If the
+synth raises, the upload fails or Sonos can't play the clip, the HA engine
+path above is used. Alexa is unchanged (it speaks the text itself), and with
+no synth the behaviour is the same as before. The hub's synth (Settings →
+Speech) uses its house voice; an app's `voice` is only a hint.
+
 ## Displays
 
 `bdh_sdk.displays.status()` (needs the `displays.read` permission, container

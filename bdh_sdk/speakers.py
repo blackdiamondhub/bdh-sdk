@@ -19,10 +19,17 @@ HA doesn't have (e.g. Nabu Casa signed out) falls back to that default
 instead of failing. ``voice`` only applies to Home Assistant Cloud and is
 dropped for other engines.
 
+The hub can make the speech itself instead: :func:`set_synth` installs a
+function ``synth(message, voice) -> (audio bytes, content type)``. Sonos then
+plays that audio, uploaded once to HA's local media (``bdh-tts/<sha256>.mp3``)
+and still played as an announcement, and :func:`tts_audio` returns it. When the
+synth raises, the HA engine path above is used instead.
+
 :func:`tts_audio` returns the spoken message as audio instead, for the hub to
 play on its own screens (see ``Alert.speak`` in :mod:`bdh_sdk.alerts`).
 Needs ``bdh-sdk[ha]``.
 """
+import hashlib
 import logging
 import threading
 import time
@@ -34,7 +41,10 @@ from urllib.parse import quote
 from . import ha
 from .alerts import CHIMES, SILENT
 
-__all__ = ["DEFAULT_TTS", "AnnounceError", "announce", "chime_seconds", "list_speakers", "set_backend", "tts_audio"]
+__all__ = [
+    "DEFAULT_TTS", "AnnounceError", "announce", "chime_seconds", "list_speakers", "set_backend", "set_synth",
+    "tts_audio",
+]
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +53,10 @@ HA_CLOUD_TTS = "tts.home_assistant_cloud"
 _ENGINES_TTL = 300
 _engines = {"at": 0.0, "ids": []}
 CHIME_FOLDER = "bdh-chimes"
+CLIP_FOLDER = "bdh-tts"
+_CLIPS_MAX = 512
+_EXTENSIONS = {"audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav", "audio/x-wav": "wav",
+               "audio/ogg": "ogg", "audio/flac": "flac"}
 
 SONOS = "sonos"
 ALEXA = "alexa_media"
@@ -50,6 +64,7 @@ _PLATFORMS = {SONOS: "Sonos", ALEXA: "Alexa"}
 
 _lock = threading.Lock()
 _uploaded = {}
+_clips = OrderedDict()  # (HA url, sha256 of the audio) -> media id
 
 MAX_TTS_TEXT = 300
 _TTS_CACHE_SIZE = 32
@@ -70,6 +85,38 @@ def set_backend(backend):
     ``None`` restores direct Home Assistant calls."""
     global _backend
     _backend = backend
+
+
+_synth = None
+
+
+def set_synth(synth):
+    """Make the speech with ``synth(message, voice)`` instead of HA's TTS.
+
+    It returns ``(audio bytes, content type)``, ``None`` to let HA's TTS
+    engine speak this time, or raises; on an exception :func:`announce` and
+    :func:`tts_audio` fall back to HA's TTS engine too (logged).
+    ``None`` goes back to HA's TTS only.
+    """
+    global _synth
+    _synth = synth
+
+
+def _synthesize(message, voice):
+    """The synth's audio, or ``None`` (logged) when there is no synth or it failed."""
+    if _synth is None:
+        return None
+    try:
+        result = _synth(message, voice)
+        if result is None:
+            return None
+        audio, content_type = result
+        if not audio:
+            raise ValueError("no audio")
+        return audio, content_type
+    except Exception as exc:
+        log.warning("speech synth failed, using Home Assistant TTS: %s", exc)
+        return None
 
 
 def _registry():
@@ -120,6 +167,25 @@ def _chime_media_id(chime):
     return _uploaded[chime]
 
 
+def _clip_media_id(audio, content_type):
+    """Media id of ``audio`` in HA's local media, uploading it the first time."""
+    sha = hashlib.sha256(audio).hexdigest()
+    try:
+        where = ha._base_url()
+    except Exception:
+        where = ""
+    key = (where, sha)
+    if key in _clips:
+        _clips.move_to_end(key)
+        return _clips[key]
+    ext = _EXTENSIONS.get((content_type or "").split(";")[0].strip().lower(), "mp3")
+    media_id = ha.upload_media(CLIP_FOLDER, f"{sha}.{ext}", audio, content_type or "audio/mpeg")
+    _clips[key] = media_id
+    while len(_clips) > _CLIPS_MAX:
+        _clips.popitem(last=False)
+    return media_id
+
+
 def _tts_engines():
     """HA's TTS entity ids, refreshed every few minutes."""
     now = time.monotonic()
@@ -168,8 +234,9 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
 
     ``volume`` (0-100) applies to Sonos only; ``None`` keeps each speaker's
     own. ``chime`` is a name from :data:`~bdh_sdk.alerts.CHIMES`, or ``None``
-    or :data:`~bdh_sdk.alerts.SILENT` for none. ``voice`` is passed to the TTS
-    engine when it's Home Assistant Cloud (e.g. ``"AvaNeural"``).
+    or :data:`~bdh_sdk.alerts.SILENT` for none. ``voice`` is passed to the
+    synth (see :func:`set_synth`) and to the TTS engine when it's Home
+    Assistant Cloud (e.g. ``"AvaNeural"``).
 
     Blocks until the message has been sent. Returns the entity ids that
     failed; raises AnnounceError if every speaker failed.
@@ -204,6 +271,14 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
                 failed += alexa
 
         if sonos:
+            # Made before the chime so the message follows it straight away.
+            speech = None
+            clip = _synthesize(message, voice)
+            if clip is not None:
+                try:
+                    speech = _clip_media_id(*clip)
+                except ha.HAError as exc:
+                    log.warning("speech upload failed, using Home Assistant TTS: %s", exc)
             if chime not in (None, SILENT):
                 try:
                     ok, err = _play(sonos, _chime_media_id(chime), volume)
@@ -213,7 +288,13 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
                         log.warning("chime failed: %s", err)
                 except ha.HAError as exc:
                     log.warning("chime upload failed: %s", exc)
-            ok, err = _play(sonos, _tts_media_id(message, _engine(tts_engine), voice), volume)
+            ok = False
+            if speech is not None:
+                ok, err = _play(sonos, speech, volume)
+                if not ok:
+                    log.warning("Sonos announce of the hub's speech failed, using Home Assistant TTS: %s", err)
+            if not ok:
+                ok, err = _play(sonos, _tts_media_id(message, _engine(tts_engine), voice), volume)
             if not ok:
                 log.warning("Sonos announce failed: %s", err)
                 failed += sonos
@@ -224,9 +305,11 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
 
 
 def tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
-    """``message`` spoken by Home Assistant, as ``(audio bytes, content type)``.
+    """``message`` spoken, as ``(audio bytes, content type)``.
 
-    Recent messages are cached, so a repeated alert doesn't call HA again.
+    From the synth when one is set (see :func:`set_synth`; it does its own
+    caching), else from Home Assistant, with recent messages cached so a
+    repeated alert doesn't call HA again.
     Raises ValueError for empty or over-long text and ``ha.HAError`` when HA
     can't make it.
     """
@@ -237,6 +320,9 @@ def tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
         raise ValueError("message is required")
     if len(message) > MAX_TTS_TEXT:
         raise ValueError(f"message must be at most {MAX_TTS_TEXT} characters")
+    clip = _synthesize(message, voice)
+    if clip is not None:
+        return clip
     tts_engine = _engine(tts_engine)
     voice = voice if _voice_options(tts_engine, voice) else None
     key = (message, tts_engine, voice or "")
