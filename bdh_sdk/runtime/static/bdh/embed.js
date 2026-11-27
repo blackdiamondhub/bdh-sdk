@@ -13,6 +13,7 @@
  *   open-overlay  {kind, ...}           ask the hub to open one of its overlays
  *
  * window.bdh: send(type, data), navigate(target), toast(message, level),
+ *             confirm(message, opts) -> Promise<bool>, alert(message),
  *             on(type, fn) for messages from the hub,
  *             stats(fn) adds app numbers to the hub's remote `frame state`.
  *
@@ -69,12 +70,104 @@
 
     var statsProviders = [];
 
+    /* In-page confirm: the hub's iframe sandbox has no allow-modals, so the
+     * browser ignores window.confirm/alert/prompt. Resolves true for OK.
+     * opts: ok, cancel (null hides it), danger, near (element to sit by:
+     * the frame is as tall as its content, so the viewport middle may be
+     * off screen). */
+    var dialogOpen = null;
+    function confirmDialog(message, opts) {
+        opts = opts || {};
+        if (dialogOpen) dialogOpen(false);
+        return new Promise(function (resolve) {
+            var back = document.createElement('div');
+            back.className = 'bdh-dialog-back';
+            back.setAttribute('style', 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.55);');
+            var box = document.createElement('div');
+            box.className = 'bdh-dialog';
+            box.setAttribute('role', 'alertdialog');
+            box.setAttribute('aria-modal', 'true');
+            box.setAttribute('style', 'position:absolute;left:50%;transform:translateX(-50%);width:min(440px,calc(100vw - 32px));' +
+                'background:#18243a;color:#eef3fa;border:1px solid #26354f;border-radius:18px;padding:22px 22px 18px;' +
+                'box-shadow:0 20px 60px rgba(0,0,0,.5);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;');
+            var text = document.createElement('p');
+            text.setAttribute('style', 'margin:0 0 18px;white-space:pre-line;');
+            text.textContent = String(message);
+            var row = document.createElement('div');
+            row.setAttribute('style', 'display:flex;justify-content:flex-end;gap:10px;');
+            function button(label, primary) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = label;
+                b.setAttribute('style', 'min-height:44px;padding:0 18px;border-radius:12px;font:inherit;font-weight:600;cursor:pointer;' +
+                    (primary ? 'border:0;color:#fff;background:' + (opts.danger ? '#c0392b' : '#2f7fd0') + ';'
+                             : 'border:1px solid #33465f;color:#eef3fa;background:transparent;'));
+                return b;
+            }
+            var cancel = opts.cancel === null ? null : button(opts.cancel || 'Cancel', false);
+            var ok = button(opts.ok || 'OK', true);
+            if (cancel) row.appendChild(cancel);
+            row.appendChild(ok);
+            box.appendChild(text);
+            box.appendChild(row);
+            back.appendChild(box);
+            document.body.appendChild(back);
+
+            var vh = window.innerHeight, h = box.offsetHeight, top = (vh - h) / 2;
+            var near = opts.near && opts.near.getBoundingClientRect ? opts.near.getBoundingClientRect() : null;
+            if (near && (near.top || near.bottom)) top = near.top + near.height / 2 - h / 2;
+            box.style.top = Math.max(8, Math.min(top, vh - h - 8)) + 'px';
+
+            var focusBack = document.activeElement;
+            function done(value) {
+                if (dialogOpen !== done) return;
+                dialogOpen = null;
+                document.removeEventListener('keydown', key, true);
+                back.remove();
+                if (focusBack && focusBack.focus) try { focusBack.focus({preventScroll: true}); } catch (e) { /* gone */ }
+                resolve(value);
+            }
+            function key(e) {
+                if (e.key === 'Escape') { e.preventDefault(); done(false); }
+                else if (e.key === 'Enter') { e.preventDefault(); done(true); }
+            }
+            dialogOpen = done;
+            ok.addEventListener('click', function () { done(true); });
+            if (cancel) cancel.addEventListener('click', function () { done(false); });
+            back.addEventListener('click', function (e) { if (e.target === back) done(false); });
+            document.addEventListener('keydown', key, true);
+            (cancel || ok).focus({preventScroll: true});
+        });
+    }
+
+    /* <button data-bdh-confirm="Remove this feed?" data-bdh-confirm-ok="Remove"> (also on
+     * links or anything clickable): asks first, then repeats the click (so a submit
+     * button still sends its name/value). data-bdh-confirm-danger="0" for a non-destructive OK. */
+    document.addEventListener('click', function (e) {
+        var el = e.target.closest && e.target.closest('[data-bdh-confirm]');
+        if (!el) return;
+        if (el._bdhConfirmed) { el._bdhConfirmed = false; return; }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        confirmDialog(el.getAttribute('data-bdh-confirm'), {
+            ok: el.getAttribute('data-bdh-confirm-ok') || 'OK',
+            danger: el.getAttribute('data-bdh-confirm-danger') !== '0',
+            near: el,
+        }).then(function (yes) {
+            if (!yes) return;
+            el._bdhConfirmed = true;
+            el.click();
+        });
+    }, true);
+
     window.bdh = {
         embedded: framed && !!hubOrigin,
         hubOrigin: hubOrigin,
         send: send,
         navigate: navigate,
         toast: function (message, level) { return send('toast', {message: String(message), level: level || 'info'}); },
+        confirm: confirmDialog,
+        alert: function (message) { return confirmDialog(message, {cancel: null, danger: false}); },
         on: on,
         stats: function (fn) { if (typeof fn === 'function') statsProviders.push(fn); },
         _statsProviders: statsProviders,

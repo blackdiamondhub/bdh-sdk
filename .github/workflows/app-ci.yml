@@ -137,6 +137,11 @@ jobs:
           pip install -r hub/requirements.txt
           pip install "bdh-sdk @ git+https://github.com/blackdiamondhub/bdh-sdk@${{ inputs.sdk_ref }}"
 
+      # The hub's iframe sandbox has no allow-modals: confirm()/alert()/prompt()
+      # are silently ignored, so e.g. a confirm-guarded delete does nothing.
+      - name: No native dialogs
+        run: python -m bdh_sdk.lint app
+
       - name: Build and install the app wheel
         run: |
           python -m build --wheel -o dist app

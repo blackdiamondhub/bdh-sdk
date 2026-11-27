@@ -749,6 +749,15 @@ and the hub proxies to it inside an iframe.
   runs a fixed set of commands (`state`, `query`, `tap`, `swipe`, `key`,
   `measure`, `logs`; no eval) and stands in for fullscreen, which synthetic taps
   can't request.
+- The hub frames apps without `allow-modals`, so the browser silently ignores
+  `confirm()`, `alert()` and `prompt()` (a `return confirm(...)` button then
+  does nothing). Use `data-bdh-confirm="Remove this feed?"` (optional
+  `data-bdh-confirm-ok="Remove"`) on the button or link: embed.js asks in the
+  page and then repeats the click, so a submit button still sends its
+  name/value. From JS: `bdh.confirm(message, {ok, cancel, danger, near})`
+  returns a Promise of true/false, and `bdh.alert(message)` shows a notice.
+  App CI runs `python -m bdh_sdk.lint` and fails on native dialog calls
+  (`bdh-lint: allow-dialog` on a line skips it).
 
 Manifest fields for the app store: `permissions`, `network`
 (`none`/`outbound`/`lan`), `lifecycle` (`always`/`on_demand`), `memory_mb`,
