@@ -93,8 +93,9 @@ _synth = None
 def set_synth(synth):
     """Make the speech with ``synth(message, voice)`` instead of HA's TTS.
 
-    It returns ``(audio bytes, content type)`` or raises; on any exception
-    :func:`announce` and :func:`tts_audio` fall back to HA's TTS engine.
+    It returns ``(audio bytes, content type)``, ``None`` to let HA's TTS
+    engine speak this time, or raises; on an exception :func:`announce` and
+    :func:`tts_audio` fall back to HA's TTS engine too (logged).
     ``None`` goes back to HA's TTS only.
     """
     global _synth
@@ -106,7 +107,10 @@ def _synthesize(message, voice):
     if _synth is None:
         return None
     try:
-        audio, content_type = _synth(message, voice)
+        result = _synth(message, voice)
+        if result is None:
+            return None
+        audio, content_type = result
         if not audio:
             raise ValueError("no audio")
         return audio, content_type

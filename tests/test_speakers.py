@@ -233,3 +233,10 @@ class SynthTests(unittest.TestCase):
         self.synth.side_effect = RuntimeError("down")
         self.assertEqual(speakers.tts_audio("hi"), (b"HA", "audio/mpeg"))
         get_tts.assert_called_once()
+
+    @mock.patch("bdh_sdk.ha.get_tts", return_value=(b"HA", "audio/mpeg"))
+    def test_synth_none_means_ha_without_warning(self, get_tts, _ws, _sleep):
+        self.synth.return_value = None
+        with self.assertNoLogs("bdh_sdk.speakers", "WARNING"):
+            self.assertEqual(speakers.tts_audio("hi"), (b"HA", "audio/mpeg"))
+        get_tts.assert_called_once()

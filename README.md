@@ -582,7 +582,8 @@ it to speak alerts on its own screens (`Alert.speak`); it raises `ha.HAError`
 when HA can't make it.
 
 The hub can make the speech itself (SDK 0.49+): `speakers.set_synth(fn)`
-installs `fn(message, voice) -> (audio bytes, content type)`. With a synth
+installs `fn(message, voice) -> (audio bytes, content type)` (or `None`
+to let HA's engine speak). With a synth
 set, Sonos plays its audio (uploaded once per clip to HA's local media as
 `bdh-tts/<sha256>.mp3`, still as an announcement, so the music ducks and
 resumes) and `tts_audio` returns it; the synth does its own caching. If the
