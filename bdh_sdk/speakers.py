@@ -47,7 +47,7 @@ from importlib import resources
 from urllib.parse import quote
 
 from . import ha
-from .alerts import CHIMES, SILENT
+from .alerts import CHIMES, MAX_TTS_TEXT, SILENT
 
 __all__ = [
     "DEFAULT_TTS", "FAILED", "MAX_PLAY_BYTES", "MAX_PLAY_SECONDS", "OFFLINE", "PLAYED", "UNSUPPORTED",
@@ -75,7 +75,6 @@ _lock = threading.Lock()
 _uploaded = {}
 _clips = OrderedDict()  # (HA url, sha256 of the audio) -> media id
 
-MAX_TTS_TEXT = 300
 _TTS_CACHE_SIZE = 32
 
 # A speaker's result in announce(..., detail=True) and play(..., detail=True).
@@ -319,6 +318,16 @@ def _play(entity_ids, media_id, volume):
     return ha.call_service("media_player", "play_media", entity_ids, extra)
 
 
+def check_message(message):
+    """``message`` stripped; ValueError when it's empty or over :data:`MAX_TTS_TEXT` characters."""
+    message = message.strip() if isinstance(message, str) else ""
+    if not message:
+        raise ValueError("message is required")
+    if len(message) > MAX_TTS_TEXT:
+        raise ValueError(f"message must be at most {MAX_TTS_TEXT} characters")
+    return message
+
+
 def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS, voice=None, *, detail=False):
     """Speak ``message`` on ``speakers`` (ids from :func:`list_speakers` or :func:`devices`).
 
@@ -333,7 +342,10 @@ def announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS,
     returns ``{id: "played" | "failed" | "unsupported" | "offline"}`` instead
     and doesn't raise when speakers fail (SDK 0.50+; a hub from before
     answers with the failed list, turned into ``played``/``failed``).
+    Raises ValueError for an empty message or one over :data:`MAX_TTS_TEXT`
+    characters, before anything plays.
     """
+    check_message(message)
     if _backend is not None:
         if not detail:
             return _backend.announce(message, speakers, volume, chime, tts_engine, voice)
@@ -374,8 +386,7 @@ def play(audio, speakers, volume=None, *, night=False, detail=False):
 def ha_announce(message, speakers, volume=None, chime=None, tts_engine=DEFAULT_TTS, voice=None, *,
                 detail=False):
     """:func:`announce` straight through Home Assistant, ignoring any backend."""
-    if not message or not message.strip():
-        raise ValueError("message is required")
+    check_message(message)
     if chime not in (None, SILENT) and chime not in CHIMES:
         raise ValueError(f"unknown chime {chime!r}")
     if volume is not None and not 0 <= int(volume) <= 100:
@@ -453,11 +464,7 @@ def tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
 
 def ha_tts_audio(message, tts_engine=DEFAULT_TTS, voice=None):
     """:func:`tts_audio` from the synth or Home Assistant, ignoring any backend."""
-    message = (message or "").strip()
-    if not message:
-        raise ValueError("message is required")
-    if len(message) > MAX_TTS_TEXT:
-        raise ValueError(f"message must be at most {MAX_TTS_TEXT} characters")
+    message = check_message(message or "")
     clip = _synthesize(message, voice)
     if clip is not None:
         return clip

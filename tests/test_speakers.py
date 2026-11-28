@@ -151,6 +151,19 @@ class BackendDispatchTests(unittest.TestCase):
         self.assertEqual(speakers.play(bytearray(b"ID3"), ["a", "a"], 20, night=True, detail=True), {"a": "offline"})
         backend.play.assert_called_once_with(b"ID3", ["a"], 20, night=True, detail=True)
 
+    @mock.patch("bdh_sdk.ha.call_service")
+    def test_message_limit_is_checked_before_anything_plays(self, call):
+        self.assertEqual(speakers.MAX_TTS_TEXT, 200)
+        backend = mock.Mock()
+        backend.announce.return_value = []
+        speakers.set_backend(backend)
+        self.assertEqual(speakers.announce("x" * 200, ["a"]), [])
+        for fn in (speakers.announce, speakers.ha_announce):
+            with self.subTest(fn=fn.__name__), self.assertRaisesRegex(ValueError, "at most 200 characters"):
+                fn("x" * 201, ["a", "media_player.echo"])
+        backend.announce.assert_called_once()
+        call.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -194,7 +207,7 @@ class TtsAudioTests(unittest.TestCase):
         self.assertNotIn(("timer 0", "tts.google_translate_en_com", ""), speakers._tts_cache)
 
     def test_rejects_empty_or_long_text(self):
-        for bad in ("", "   ", "x" * 301):
+        for bad in ("", "   ", "x" * (speakers.MAX_TTS_TEXT + 1)):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 speakers.tts_audio(bad)
 

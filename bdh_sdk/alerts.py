@@ -36,7 +36,9 @@ __all__ = ["CHIMES", "SILENT", "Alert", "apush", "dismiss", "push", "set_sender"
 log = logging.getLogger(__name__)
 
 MAX_TTL = 600
-MAX_SPEAK = 300
+# The longest text the hub speaks (about 15 s): announcements and Alert.speak.
+MAX_TTS_TEXT = 200
+MAX_SPEAK = MAX_TTS_TEXT
 
 _APP_ID = re.compile(r"^[a-z0-9_]+$")
 

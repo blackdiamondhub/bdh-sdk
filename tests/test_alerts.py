@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from bdh_sdk.alerts import CHIMES, SILENT, Alert, apush, dismiss, push, set_sender
+from bdh_sdk.alerts import CHIMES, MAX_SPEAK, SILENT, Alert, apush, dismiss, push, set_sender
 
 
 def make(**kw):
@@ -35,7 +35,7 @@ class AlertTests(unittest.TestCase):
     def test_speak_is_short_text(self):
         self.assertEqual(make(speak="Egg timer has expired", resound=True).as_dict()["speak"],
                          "Egg timer has expired")
-        for bad in ("x" * 301, None):
+        for bad in ("x" * (MAX_SPEAK + 1), None):
             with self.subTest(speak=bad), self.assertRaises(ValueError):
                 make(speak=bad)
 
